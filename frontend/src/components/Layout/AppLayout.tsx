@@ -7,7 +7,7 @@ import { useNotifications } from '../../api/notifications.api';
 import {
   DashboardOutlined, TeamOutlined, BellOutlined, BarChartOutlined,
   LogoutOutlined, UserOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-  FileTextOutlined, HomeOutlined,
+  FileTextOutlined, HomeOutlined, CheckSquareOutlined, LineChartOutlined, FolderOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth.store';
@@ -103,20 +103,28 @@ const AppLayout: React.FC = () => {
           zIndex: 100,
         }}>
           {[
-            { path: '/student', icon: <HomeOutlined />, label: '主页', badge: 0 },
-            { path: '/student/notifications', icon: <BellOutlined />, label: '通知', badge: unreadCount },
-          ].map(item => (
-            <div key={item.path} onClick={() => navigate(item.path)}
-              style={{ textAlign: 'center', cursor: 'pointer', padding: '4px 16px',
-                color: location.pathname === item.path ? '#1677ff' : '#666' }}>
-              <div style={{ fontSize: 20 }}>
-                <Badge count={item.badge} size="small" offset={[4, -4]}>
-                  {item.icon}
-                </Badge>
+            { path: '/student',               icon: <HomeOutlined />,         label: '主页', badge: 0 },
+            { path: '/student/tasks',          icon: <CheckSquareOutlined />,  label: '待办', badge: 0 },
+            { path: '/student/progress',       icon: <LineChartOutlined />,    label: '进度', badge: 0 },
+            { path: '/student/notifications',  icon: <BellOutlined />,         label: '通知', badge: unreadCount },
+            { path: '/student/files',          icon: <FolderOutlined />,       label: '文件', badge: 0 },
+          ].map(item => {
+            const isActive = item.path === '/student'
+              ? location.pathname === '/student'
+              : location.pathname.startsWith(item.path);
+            return (
+              <div key={item.path} onClick={() => navigate(item.path)}
+                style={{ textAlign: 'center', cursor: 'pointer', padding: '4px 8px', flex: 1,
+                  color: isActive ? '#1677ff' : '#666' }}>
+                <div style={{ fontSize: 20 }}>
+                  <Badge count={item.badge} size="small" offset={[4, -4]}>
+                    {item.icon}
+                  </Badge>
+                </div>
+                <div style={{ fontSize: 10 }}>{item.label}</div>
               </div>
-              <div style={{ fontSize: 11 }}>{item.label}</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Layout>
     );
