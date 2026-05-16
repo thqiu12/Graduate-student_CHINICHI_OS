@@ -131,4 +131,104 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.send({ noPlan, pendingTooLong });
     }
   );
+
+  // ─── GET /api/stats/teacher-dashboard ─── 班主任看板专用统计
+  // 返回：阶段分布 + 内诺状态分布（仅理科学生的志望校内诺）
+  fastify.get(
+    '/stats/teacher-dashboard',
+    {
+      preHandler: [
+        authenticate,
+        authorize([Roles.TEACHER, Roles.SUBJECT_HEAD, Roles.ADMIN_TOTAL]),
+      ],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      // 获取当前班主任负责的所有学生
+      const students = await fastify.prisma.student.findMany({
+        select: {
+          id: true,
+          periodPlans: {
+            orderBy: { version: 'desc' },
+            take: 1,
+            select: {
+              periodCode: true,
+              stageName: true,
+              status: true,
+            },
+          },
+          targetSchools: {
+            select: {
+              id: true,
+              universityName: true,
+              innoTracking: {
+                select: {
+                  status: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      // 阶段分布统计
+      const stageMap: Record<string, { code: string; stageName: string; count: number }> = {};
+      let noActivePlan = 0;
+
+      for (const s of students) {
+        const latest = s.periodPlans[0];
+        if (!latest || latest.status !== 'active') {
+          noActivePlan++;
+          continue;
+        }
+        const key = latest.periodCode;
+        if (!stageMap[key]) {
+          stageMap[key] = { code: key, stageName: latest.stageName, count: 0 };
+        }
+        stageMap[key].count++;
+      }
+
+      const stageDistribution = Object.values(stageMap).sort((a, b) =>
+        a.code.localeCompare(b.code),
+      );
+
+      // 内诺状态统计（汇总所有学生的志望校内诺）
+      const innoStatusMap: Record<string, number> = {
+        not_started: 0,
+        in_progress: 0,
+        confirmed: 0,
+        rejected: 0,
+      };
+      let innoTotal = 0;
+
+      for (const s of students) {
+        for (const school of s.targetSchools) {
+          if (school.innoTracking) {
+            const status = school.innoTracking.status ?? 'not_started';
+            innoStatusMap[status] = (innoStatusMap[status] ?? 0) + 1;
+            innoTotal++;
+          }
+        }
+      }
+
+      // 内诺确认率
+      const innoRate =
+        innoTotal > 0
+          ? Math.round((innoStatusMap['confirmed'] / innoTotal) * 100)
+          : 0;
+
+      return reply.send({
+        totalStudents: students.length,
+        noActivePlan,
+        stageDistribution,
+        inno: {
+          total: innoTotal,
+          confirmed: innoStatusMap['confirmed'],
+          inProgress: innoStatusMap['in_progress'],
+          notStarted: innoStatusMap['not_started'],
+          rejected: innoStatusMap['rejected'],
+          rate: innoRate,
+        },
+      });
+    },
+  );
 }

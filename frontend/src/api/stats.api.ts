@@ -44,3 +44,36 @@ export function useAlerts() {
     },
   });
 }
+
+// ─── 班主任看板专用统计 ────────────────────────────────────
+
+export interface StageDistributionItem {
+  code: string;
+  stageName: string;
+  count: number;
+}
+
+export interface TeacherDashboardStats {
+  totalStudents: number;
+  noActivePlan: number;
+  stageDistribution: StageDistributionItem[];
+  inno: {
+    total: number;
+    confirmed: number;
+    inProgress: number;
+    notStarted: number;
+    rejected: number;
+    rate: number;
+  };
+}
+
+export function useTeacherDashboardStats() {
+  return useQuery({
+    queryKey: ['stats', 'teacher-dashboard'],
+    queryFn: async () => {
+      const res = await apiClient.get<TeacherDashboardStats>('/stats/teacher-dashboard');
+      return res.data;
+    },
+    staleTime: 30 * 1000,
+  });
+}
