@@ -13,7 +13,13 @@ import {
 import { useAuthStore } from '../../stores/auth.store';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../../api/client';
-import type { UploadChangeInfo } from 'antd/es/upload';
+import type { UploadFile } from 'antd';
+
+// UploadChangeInfo 结构
+interface UploadChangeInfo {
+  file: UploadFile & { response?: { message?: string } };
+  fileList: UploadFile[];
+}
 
 const { Title, Text } = Typography;
 
