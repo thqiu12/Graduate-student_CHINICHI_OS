@@ -12,6 +12,7 @@ export interface JwtPayload {
   sub: string;        // 用户 ID
   name: string;       // 用户姓名
   roles: string[];    // 角色列表
+  type?: string;      // token 类型 (access / refresh)
   iat?: number;
   exp?: number;
 }

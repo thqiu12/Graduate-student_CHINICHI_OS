@@ -44,7 +44,7 @@ async function generateTokens(
   });
 
   const refreshToken = fastify.jwt.sign(
-    { sub: userId, type: 'refresh' },
+    { sub: userId, name: userName, roles, type: 'refresh' } as any,
     { expiresIn: process.env['JWT_REFRESH_EXPIRES_IN'] ?? '30d' },
   );
 

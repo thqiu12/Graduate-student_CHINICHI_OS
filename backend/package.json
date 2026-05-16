@@ -4,7 +4,7 @@
   "description": "知日塾大学院考学进度管理系统 - 后端服务",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "ts-node --esm src/index.ts",
+    "dev": "ts-node src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",

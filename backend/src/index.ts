@@ -150,7 +150,7 @@ async function start(): Promise<void> {
       createCheckUnsetPlansWorker(fastify.prisma);
       fastify.log.info('BullMQ 定时任务已启动');
     } catch (err) {
-      fastify.log.warn('BullMQ 启动失败（Redis 可能未连接）:', err);
+      fastify.log.warn({ err }, 'BullMQ 启动失败（Redis 可能未连接）');
     }
   }
 
@@ -163,7 +163,7 @@ async function start(): Promise<void> {
       fastify.log.info('服务已优雅退出');
       process.exit(0);
     } catch (err) {
-      fastify.log.error('退出时发生错误:', err);
+      fastify.log.error({ err }, '退出时发生错误');
       process.exit(1);
     }
   };
@@ -178,7 +178,7 @@ async function start(): Promise<void> {
     fastify.log.info(`环境: ${NODE_ENV}`);
     fastify.log.info(`健康检查: ${address}/health`);
   } catch (err) {
-    fastify.log.error('服务启动失败:', err);
+    fastify.log.error({ err }, '服务启动失败');
     process.exit(1);
   }
 }

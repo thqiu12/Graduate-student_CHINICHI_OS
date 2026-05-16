@@ -9,7 +9,7 @@ import { authenticate } from '../middlewares/authenticate';
 import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, createError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
-import { PlanStatus } from '@prisma/client';
+import { PlanStatus, Prisma } from '@prisma/client';
 
 // ─── 请求体 Schema ───────────────────────────────────────
 const createPlanSchema = z.object({
@@ -68,7 +68,7 @@ async function writeOperationLog(
     actionType: string;
     targetType?: string;
     targetId?: string;
-    detail?: Record<string, unknown>;
+    detail?: any;
   },
 ): Promise<void> {
   await fastify.prisma.operationLog.create({
@@ -79,7 +79,7 @@ async function writeOperationLog(
       actionType: options.actionType,
       targetType: options.targetType,
       targetId: options.targetId,
-      detail: options.detail ?? {},
+      detail: (options.detail ?? {}) as any,
     },
   });
 }
@@ -215,7 +215,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           endDate: plan.endDate,
           taskCount: body.tasks.length,
           version: newVersion,
-        },
+        } as unknown as Prisma.InputJsonValue,
       });
 
       return reply.status(201).send({ data: plan });
@@ -289,7 +289,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           planVersion: plan.version,
           stageName: plan.stageName,
           sentAt: updatedPlan.sentAt,
-        },
+        } as unknown as Prisma.InputJsonValue,
       });
 
       return reply.send({ data: updatedPlan, message: '规划已发送给学生确认' });
@@ -370,7 +370,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           planVersion: plan.version,
           stageName: plan.stageName,
           confirmedAt: now,
-        },
+        } as unknown as Prisma.InputJsonValue,
       });
 
       return reply.send({ data: updatedPlan, message: '规划已确认，开始执行！' });
@@ -461,7 +461,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           planVersion: plan.version,
           stageName: plan.stageName,
           rejectContent: parsed.data.content,
-        },
+        } as unknown as Prisma.InputJsonValue,
       });
 
       return reply.send({ message: '异议已提交，班主任将与你重新协商' });
@@ -568,7 +568,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
             startDate: body.startDate,
             endDate: body.endDate,
           },
-        },
+        } as unknown as Prisma.InputJsonValue,
       });
 
       return reply.status(201).send({
@@ -615,7 +615,8 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         take: 100,
       });
 
-      return reply.send({ data: logs });
+      const safeL = logs.map((l) => ({ ...l, id: l.id.toString() }));
+      return reply.send({ data: safeL, message: "操作日志获取成功" });
     },
   );
 }

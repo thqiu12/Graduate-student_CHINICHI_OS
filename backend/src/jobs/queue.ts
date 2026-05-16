@@ -140,49 +140,49 @@ export async function scheduleRecurringJobs(): Promise<void> {
   await checkOverdueTasksQueue.add(
     'daily-check',
     {},
-    { repeat: { cron: '0 8 * * *' } },
+    { repeat: { pattern: '0 8 * * *' } },
   );
 
   // 每天 9:00 - 检查未设定规划
   await checkUnsetPlansQueue.add(
     'daily-check',
     {},
-    { repeat: { cron: '0 9 * * *' } },
+    { repeat: { pattern: '0 9 * * *' } },
   );
 
   // 每天 9:00 - 检查未确认规划
   await checkUnconfirmedPlansQueue.add(
     'daily-check',
     {},
-    { repeat: { cron: '5 9 * * *' } },
+    { repeat: { pattern: '5 9 * * *' } },
   );
 
   // 每天 9:00 - 截止日临近提醒
   await checkDeadlineApproachingQueue.add(
     'daily-check',
     {},
-    { repeat: { cron: '10 9 * * *' } },
+    { repeat: { pattern: '10 9 * * *' } },
   );
 
   // 每天 10:00 - 内诺跟进提醒
   await checkInnoFollowupQueue.add(
     'daily-check',
     {},
-    { repeat: { cron: '0 10 * * *' } },
+    { repeat: { pattern: '0 10 * * *' } },
   );
 
   // 每周一 8:30 - 班主任周报
   await weeklySummaryTeacherQueue.add(
     'weekly-report',
     {},
-    { repeat: { cron: '30 8 * * 1' } },
+    { repeat: { pattern: '30 8 * * 1' } },
   );
 
   // 每周一 9:00 - 学科负责人周报
   await weeklySummaryDeptQueue.add(
     'weekly-report',
     {},
-    { repeat: { cron: '0 9 * * 1' } },
+    { repeat: { pattern: '0 9 * * 1' } },
   );
 
   console.log('[BullMQ] 定时任务已调度');
