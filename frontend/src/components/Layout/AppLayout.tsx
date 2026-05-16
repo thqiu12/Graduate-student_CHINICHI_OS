@@ -3,6 +3,7 @@
 
 import React, { useState } from 'react';
 import { Layout, Menu, Avatar, Dropdown, Badge, Button, Typography } from 'antd';
+import { useNotifications } from '../../api/notifications.api';
 import {
   DashboardOutlined, TeamOutlined, BellOutlined, BarChartOutlined,
   LogoutOutlined, UserOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
@@ -19,6 +20,10 @@ const AppLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+
+  // 未读通知数（仅学生端底部导航显示）
+  const { data: notifData } = useNotifications(isStudent ? false : undefined);
+  const unreadCount = isStudent ? (notifData?.unreadCount ?? 0) : 0;
 
   const handleLogout = () => {
     logout();
@@ -98,13 +103,17 @@ const AppLayout: React.FC = () => {
           zIndex: 100,
         }}>
           {[
-            { path: '/student', icon: <HomeOutlined />, label: '主页' },
-            { path: '/student/notifications', icon: <BellOutlined />, label: '通知' },
+            { path: '/student', icon: <HomeOutlined />, label: '主页', badge: 0 },
+            { path: '/student/notifications', icon: <BellOutlined />, label: '通知', badge: unreadCount },
           ].map(item => (
             <div key={item.path} onClick={() => navigate(item.path)}
               style={{ textAlign: 'center', cursor: 'pointer', padding: '4px 16px',
                 color: location.pathname === item.path ? '#1677ff' : '#666' }}>
-              <div style={{ fontSize: 20 }}>{item.icon}</div>
+              <div style={{ fontSize: 20 }}>
+                <Badge count={item.badge} size="small" offset={[4, -4]}>
+                  {item.icon}
+                </Badge>
+              </div>
               <div style={{ fontSize: 11 }}>{item.label}</div>
             </div>
           ))}

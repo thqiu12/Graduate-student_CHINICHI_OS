@@ -15,6 +15,7 @@ const LoginPage = lazy(() => import('./pages/auth/Login'));
 // 学生
 const StudentHomePage = lazy(() => import('./pages/student/Home'));
 const PlanConfirmPage = lazy(() => import('./pages/student/PlanConfirm'));
+const NotificationsPage = lazy(() => import('./pages/student/Notifications'));
 
 // 班主任
 const TeacherDashboard = lazy(() => import('./pages/teacher/Dashboard'));
@@ -102,6 +103,7 @@ const App: React.FC = () => {
                   <Route element={<AppLayout />}>
                     <Route path="/student" element={<StudentHomePage />} />
                     <Route path="/student/plan-confirm/:planId" element={<PlanConfirmPage />} />
+                    <Route path="/student/notifications" element={<NotificationsPage />} />
                   </Route>
                 </Route>
 

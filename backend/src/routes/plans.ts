@@ -661,4 +661,103 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.send({ data: updated, message: body.done ? '任务已完成' : '任务已取消完成' });
     },
   );
+
+  // ─── POST /students/:studentId/plans/:planId/tasks ─── 新增任务（班主任）
+  fastify.post(
+    '/students/:studentId/plans/:planId/tasks',
+    {
+      preHandler: [authenticate, authorize([Roles.TEACHER, Roles.SUBJECT_HEAD, Roles.ADMIN_TOTAL])],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { studentId, planId } = request.params as { studentId: string; planId: string };
+      const body = request.body as {
+        title: string;
+        description?: string;
+        dueDate?: string;
+        priority?: string;
+        repeatType?: string;
+        sortOrder?: number;
+      };
+
+      // 确认规划存在且属于该学生
+      const plan = await fastify.prisma.periodPlan.findFirst({
+        where: { id: planId, studentId },
+      });
+      if (!plan) throw createError.notFound('规划不存在');
+
+      const task = await fastify.prisma.periodPlanTask.create({
+        data: {
+          planId,
+          title: body.title,
+          description: body.description ?? null,
+          dueDate: body.dueDate ? new Date(body.dueDate) : null,
+          priority: body.priority ?? '中',
+          repeatType: body.repeatType ?? 'once',
+          sortOrder: body.sortOrder ?? 0,
+          status: 'pending',
+        },
+      });
+
+      return reply.status(201).send({ data: task, message: '任务创建成功' });
+    },
+  );
+
+  // ─── PATCH /students/:studentId/tasks/:taskId ─── 编辑任务（班主任）
+  fastify.patch(
+    '/students/:studentId/tasks/:taskId',
+    {
+      preHandler: [authenticate, authorize([Roles.TEACHER, Roles.SUBJECT_HEAD, Roles.ADMIN_TOTAL])],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { studentId, taskId } = request.params as { studentId: string; taskId: string };
+      const body = request.body as {
+        title?: string;
+        description?: string;
+        dueDate?: string;
+        priority?: string;
+        repeatType?: string;
+        sortOrder?: number;
+      };
+
+      // 确认任务属于该学生的规划
+      const task = await fastify.prisma.periodPlanTask.findFirst({
+        where: { id: taskId, plan: { studentId } },
+      });
+      if (!task) throw createError.notFound('任务不存在');
+
+      const updated = await fastify.prisma.periodPlanTask.update({
+        where: { id: taskId },
+        data: {
+          ...(body.title !== undefined && { title: body.title }),
+          ...(body.description !== undefined && { description: body.description }),
+          ...(body.dueDate !== undefined && { dueDate: body.dueDate ? new Date(body.dueDate) : null }),
+          ...(body.priority !== undefined && { priority: body.priority }),
+          ...(body.repeatType !== undefined && { repeatType: body.repeatType }),
+          ...(body.sortOrder !== undefined && { sortOrder: body.sortOrder }),
+        },
+      });
+
+      return reply.send({ data: updated, message: '任务更新成功' });
+    },
+  );
+
+  // ─── DELETE /students/:studentId/tasks/:taskId ─── 删除任务（班主任）
+  fastify.delete(
+    '/students/:studentId/tasks/:taskId',
+    {
+      preHandler: [authenticate, authorize([Roles.TEACHER, Roles.SUBJECT_HEAD, Roles.ADMIN_TOTAL])],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { studentId, taskId } = request.params as { studentId: string; taskId: string };
+
+      const task = await fastify.prisma.periodPlanTask.findFirst({
+        where: { id: taskId, plan: { studentId } },
+      });
+      if (!task) throw createError.notFound('任务不存在');
+
+      await fastify.prisma.periodPlanTask.delete({ where: { id: taskId } });
+
+      return reply.send({ message: '任务已删除' });
+    },
+  );
 }

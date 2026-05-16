@@ -17,6 +17,7 @@ import { useStudent } from '../../../api/students.api';
 import { useCoachingRecords, useAddCoachingRecord } from '../../../api/coaching.api';
 import { useTargetSchools, useAddSchool, useDeleteSchool } from '../../../api/schools.api';
 import StagesTab from './StagesTab';
+import TasksTab from './TasksTab';
 import apiClient from '../../../api/client';
 
 const { Title, Text } = Typography;
@@ -382,6 +383,7 @@ const StudentDetail: React.FC = () => {
           { key: 'stages', label: '📅 考学阶段', children: <StagesTab studentId={id ?? ''} studentName={student.user?.name ?? ''} /> },
           { key: 'schools', label: '🏫 志望校', children: <SchoolsTab studentId={id ?? ''} /> },
           { key: 'coaching', label: '💬 辅导记录', children: <CoachingTab studentId={id ?? ''} /> },
+          { key: 'tasks', label: '✅ 任务管理', children: <TasksTab studentId={id ?? ''} /> },
           { key: 'files', label: '📁 文件管理', children: <FilesTab studentId={id ?? ''} /> },
         ]}
       />
