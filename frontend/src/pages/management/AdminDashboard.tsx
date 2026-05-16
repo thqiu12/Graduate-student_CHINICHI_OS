@@ -1,0 +1,166 @@
+// src/pages/management/AdminDashboard.tsx
+// 知日塾大学院考学进度管理系统 - 教务总负责人看板
+
+import React from 'react';
+import {
+  Row, Col, Card, Statistic, Table, Tag, Button, Typography, Alert,
+  Progress, Divider, message, Space, Spin,
+} from 'antd';
+import {
+  TeamOutlined, WarningOutlined, ClockCircleOutlined,
+  DownloadOutlined, TrophyOutlined,
+} from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import { useStatsOverview, useExamSeasonStats, useAlerts } from '../../api/stats.api';
+
+const { Title, Text } = Typography;
+
+const AdminDashboard: React.FC = () => {
+  const navigate = useNavigate();
+  const [messageApi, ctxHolder] = message.useMessage();
+  const { data: overview, isLoading } = useStatsOverview();
+  const { data: examStats } = useExamSeasonStats();
+  const { data: alerts } = useAlerts();
+
+  if (isLoading) return <div style={{ padding: 40, textAlign: 'center' }}><Spin size="large" /></div>;
+
+  const summer = examStats?.data?.summer;
+  const winter = examStats?.data?.winter;
+  const noPlan = alerts?.noPlan ?? [];
+  const pendingTooLong = alerts?.pendingTooLong ?? [];
+
+  const handleExport = () => {
+    messageApi.info('数据导出功能开发中，敬请期待');
+  };
+
+  const planStatData = Object.entries(overview?.planStats ?? {}).map(([status, count]) => {
+    const labels: Record<string, string> = {
+      draft: '草稿', pending: '待确认', change_pending: '变更待确认',
+      active: '执行中', completed: '已完成', cancelled: '已取消',
+    };
+    return { status, label: labels[status] ?? status, count };
+  });
+
+  return (
+    <>
+      {ctxHolder}
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <Title level={4} style={{ margin: 0 }}>教务总负责人看板</Title>
+          <Button icon={<DownloadOutlined />} onClick={handleExport}>导出全量数据</Button>
+        </div>
+
+        {/* 全校统计卡片 */}
+        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+          <Col xs={24} sm={12} lg={6}>
+            <Card>
+              <Statistic title="全校学生" value={overview?.totalStudents ?? 0} prefix={<TeamOutlined />} valueStyle={{ color: '#1677ff' }} />
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <Card>
+              <Statistic title="风险学生" value={overview?.riskStudents ?? 0} prefix={<WarningOutlined />} valueStyle={{ color: '#ff4d4f' }} />
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <Card>
+              <Statistic title="无规划学生" value={overview?.noRecentPlanStudents ?? 0} prefix={<ClockCircleOutlined />} valueStyle={{ color: '#fa8c16' }} />
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <Card>
+              <Statistic title="规划执行中" value={overview?.planStats?.['active'] ?? 0} prefix={<TrophyOutlined />} valueStyle={{ color: '#52c41a' }} />
+            </Card>
+          </Col>
+        </Row>
+
+        <Row gutter={[16, 16]}>
+          {/* 规划状态分布 */}
+          <Col xs={24} lg={8}>
+            <Card title="规划状态分布">
+              {planStatData.map(item => (
+                <div key={item.status} style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Text>{item.label}</Text>
+                    <Text strong>{item.count} 份</Text>
+                  </div>
+                  <Progress
+                    percent={overview?.totalStudents ? Math.round((item.count / overview.totalStudents) * 100) : 0}
+                    size="small"
+                    showInfo={false}
+                  />
+                </div>
+              ))}
+            </Card>
+          </Col>
+
+          {/* 考试季统计 */}
+          <Col xs={24} lg={8}>
+            <Card title="考试季内诺统计">
+              <div style={{ marginBottom: 20 }}>
+                <Text strong>🌸 夏季考</Text>
+                <Progress
+                  percent={parseInt(summer?.innoRate ?? '0')}
+                  strokeColor="#fa8c16"
+                  format={() => summer?.innoRate ?? '0%'}
+                  style={{ marginTop: 8 }}
+                />
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {summer?.innoCount ?? 0}/{summer?.total ?? 0} 名学生获内诺
+                </Text>
+              </div>
+              <Divider style={{ margin: '8px 0' }} />
+              <div>
+                <Text strong>❄️ 冬季考</Text>
+                <Progress
+                  percent={parseInt(winter?.innoRate ?? '0')}
+                  strokeColor="#1677ff"
+                  format={() => winter?.innoRate ?? '0%'}
+                  style={{ marginTop: 8 }}
+                />
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {winter?.innoCount ?? 0}/{winter?.total ?? 0} 名学生获内诺
+                </Text>
+              </div>
+            </Card>
+          </Col>
+
+          {/* 全局预警 */}
+          <Col xs={24} lg={8}>
+            <Card title={<><WarningOutlined style={{ color: '#ff4d4f' }} /> 全局预警</>}>
+              {noPlan.length > 0 && (
+                <Alert
+                  type="error"
+                  message={`⚡ ${noPlan.length} 名学生超7天无规划`}
+                  style={{ marginBottom: 8 }}
+                  action={<Button size="small" type="link" onClick={() => navigate('/teacher/students')}>处理</Button>}
+                />
+              )}
+              {pendingTooLong.length > 0 && (
+                <Alert
+                  type="warning"
+                  message={`⏳ ${pendingTooLong.length} 名学生规划超3天待确认`}
+                  style={{ marginBottom: 8 }}
+                  action={<Button size="small" type="link" onClick={() => navigate('/teacher/students')}>处理</Button>}
+                />
+              )}
+              {noPlan.length === 0 && pendingTooLong.length === 0 && (
+                <Text type="secondary">🎉 暂无预警</Text>
+              )}
+
+              <Divider style={{ margin: '12px 0' }} />
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Button block onClick={() => navigate('/teacher/students')}>查看全部学生</Button>
+                <Button block type="dashed" onClick={handleExport} icon={<DownloadOutlined />}>
+                  导出数据（权限专享）
+                </Button>
+              </Space>
+            </Card>
+          </Col>
+        </Row>
+      </div>
+    </>
+  );
+};
+
+export default AdminDashboard;

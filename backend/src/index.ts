@@ -15,6 +15,12 @@ import { authRoutes } from './routes/auth';
 import { studentRoutes } from './routes/students';
 import { planRoutes } from './routes/plans';
 import { notificationRoutes } from './routes/notifications';
+import { coachingRoutes } from './routes/coaching';
+import { schoolRoutes } from './routes/schools';
+import { riskTagRoutes } from './routes/risk-tags';
+import { fileRoutes } from './routes/files';
+import { innoRoutes } from './routes/inno';
+import { statsRoutes } from './routes/stats';
 
 // 工具
 import { AppError } from './utils/errors';
@@ -129,6 +135,12 @@ async function buildApp(): Promise<FastifyInstance> {
         await studentRoutes(app);
         await planRoutes(app);
         await notificationRoutes(app);
+        await coachingRoutes(app);
+        await schoolRoutes(app);
+        await riskTagRoutes(app);
+        await fileRoutes(app);
+        await innoRoutes(app);
+        await statsRoutes(app);
       });
     },
     { prefix: '/api' },
