@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient, UseQueryResult, UseMutationResul
 import apiClient from './client';
 import type {
   PeriodPlan,
+  PlanTask,
   PlansResponse,
   PlanResponse,
   CreatePlanRequest,
@@ -204,6 +205,36 @@ export function useChangePlan(
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: planQueryKeys.all(studentId) });
       queryClient.invalidateQueries({ queryKey: planQueryKeys.logs(studentId) });
+    },
+  });
+}
+
+// ─── 任务完成切换 ─────────────────────────────────────────
+
+async function toggleTask(
+  studentId: string,
+  taskId: string,
+  done: boolean,
+  doneNote?: string,
+): Promise<PlanTask> {
+  const res = await apiClient.patch<{ data: PlanTask }>(
+    `/students/${studentId}/tasks/${taskId}/done`,
+    { done, doneNote },
+  );
+  return res.data.data;
+}
+
+export function useToggleTask(
+  studentId: string,
+): UseMutationResult<PlanTask, Error, { taskId: string; done: boolean; doneNote?: string }> {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ taskId, done, doneNote }) =>
+      toggleTask(studentId, taskId, done, doneNote),
+    onSuccess: () => {
+      // 刷新规划列表（任务状态在规划内嵌返回）
+      queryClient.invalidateQueries({ queryKey: planQueryKeys.all(studentId) });
     },
   });
 }

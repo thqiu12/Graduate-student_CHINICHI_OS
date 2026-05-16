@@ -18,7 +18,7 @@ import {
 } from 'antd';
 import { LockOutlined } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/auth.store';
-import { useStudentPlans, useConfirmPlan, useRejectPlan } from '../../api/plans.api';
+import { useStudentPlans, useConfirmPlan, useRejectPlan, useToggleTask } from '../../api/plans.api';
 import { PlanBanner } from '../../components/PlanBanner';
 import { TaskItem } from '../../components/TaskItem';
 import { PlanStatus, TaskStatus, type PeriodPlan, type PlanTask } from '../../types/plan';
@@ -111,6 +111,7 @@ const StudentHomePage: React.FC = () => {
 
   const confirmPlanMutation = useConfirmPlan(studentId);
   const rejectPlanMutation = useRejectPlan(studentId);
+  const toggleTaskMutation = useToggleTask(studentId);
 
   const currentPlan = useMemo(() => {
     if (!plans) return null;
@@ -239,8 +240,9 @@ const StudentHomePage: React.FC = () => {
                       key={task.id}
                       task={task}
                       canCheck={true}
-                      onStatusChange={async (_taskId, _done) => {
-                        // TODO: 调用任务状态更新 API
+                      onStatusChange={async (taskId, done) => {
+                        await toggleTaskMutation.mutateAsync({ taskId, done });
+                        messageApi.success(done ? '任务已完成 🎉' : '已取消完成');
                       }}
                     />
                   ))
@@ -275,8 +277,9 @@ const StudentHomePage: React.FC = () => {
                         key={task.id}
                         task={task}
                         canCheck={true}
-                        onStatusChange={async (_taskId, _done) => {
-                          // TODO: 调用任务状态更新 API
+                        onStatusChange={async (taskId, done) => {
+                          await toggleTaskMutation.mutateAsync({ taskId, done });
+                          messageApi.success(done ? '任务已完成 🎉' : '已取消完成');
                         }}
                       />
                     ))}

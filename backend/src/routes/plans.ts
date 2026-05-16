@@ -619,4 +619,46 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.send({ data: safeL, message: "操作日志获取成功" });
     },
   );
+
+  // ─── PATCH /students/:studentId/tasks/:taskId/done ─── 任务标记完成/取消
+  fastify.patch(
+    '/students/:studentId/tasks/:taskId/done',
+    {
+      preHandler: [authenticate, authorize([Roles.STUDENT, Roles.TEACHER, Roles.SUBJECT_HEAD, Roles.ADMIN_TOTAL])],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { studentId, taskId } = request.params as { studentId: string; taskId: string };
+      const body = request.body as { done: boolean; doneNote?: string };
+      const user = request.user as JwtPayload;
+
+      // 学生只能操作自己的任务
+      if (user.roles.includes(Roles.STUDENT)) {
+        const student = await fastify.prisma.student.findFirst({
+          where: { id: studentId, userId: user.sub },
+        });
+        if (!student) throw createError.forbidden('只能操作自己的任务');
+      }
+
+      // 确认任务存在且属于该学生的规划
+      const task = await fastify.prisma.periodPlanTask.findFirst({
+        where: {
+          id: taskId,
+          plan: { studentId },
+        },
+      });
+      if (!task) throw createError.notFound('任务不存在');
+
+      const newStatus = body.done ? 'done' : 'pending';
+      const updated = await fastify.prisma.periodPlanTask.update({
+        where: { id: taskId },
+        data: {
+          status: newStatus,
+          doneAt: body.done ? new Date() : null,
+          doneNote: body.done ? (body.doneNote ?? null) : null,
+        },
+      });
+
+      return reply.send({ data: updated, message: body.done ? '任务已完成' : '任务已取消完成' });
+    },
+  );
 }

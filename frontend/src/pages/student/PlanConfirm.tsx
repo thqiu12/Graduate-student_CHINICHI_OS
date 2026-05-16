@@ -28,7 +28,7 @@ import {
   DiffOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useStudentPlans, useConfirmPlan, useRejectPlan } from '../../api/plans.api';
+import { useStudentPlans, useConfirmPlan, useRejectPlan, useToggleTask } from '../../api/plans.api';
 import { useAuthStore } from '../../stores/auth.store';
 import { TaskItem } from '../../components/TaskItem';
 import { PlanStatus, type PeriodPlan, PERIOD_LABELS, PLAN_STATUS_LABELS } from '../../types/plan';
@@ -152,6 +152,7 @@ const PlanConfirmPage: React.FC = () => {
 
   const confirmMutation = useConfirmPlan(studentId);
   const rejectMutation = useRejectPlan(studentId);
+  const toggleTaskMutation = useToggleTask(studentId);
 
   // 找到当前规划
   const currentPlan = useMemo(
@@ -308,7 +309,14 @@ const PlanConfirmPage: React.FC = () => {
               dataSource={currentPlan.tasks}
               renderItem={(task) => (
                 <List.Item style={{ padding: '0', border: 'none' }}>
-                  <TaskItem task={task} canCheck={false} />
+                  <TaskItem
+                    task={task}
+                    canCheck={currentPlan.status === 'active'}
+                    onStatusChange={async (taskId, done) => {
+                      await toggleTaskMutation.mutateAsync({ taskId, done });
+                      messageApi.success(done ? '任务已完成 🎉' : '已取消完成');
+                    }}
+                  />
                 </List.Item>
               )}
             />
