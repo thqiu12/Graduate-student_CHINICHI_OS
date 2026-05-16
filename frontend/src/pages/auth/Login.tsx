@@ -18,6 +18,13 @@ const ROLES = [
     icon: '★',
   },
   {
+    label: '学科负责人',
+    desc: '学科统筹 · 跨班级看板 · 数据汇总',
+    phone: '13900000004',
+    bg: 'linear-gradient(135deg, #eb2f96, #f759ab)',
+    icon: '◆',
+  },
+  {
     label: '班主任',
     desc: '学生管理 · 规划制定 · 内诺跟踪',
     phone: '13900000002',
