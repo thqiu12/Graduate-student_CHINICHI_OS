@@ -5,7 +5,7 @@
 import axios, { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 
 // ─── 常量 ─────────────────────────────────────────────────
-const BASE_URL = '/api';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 const TOKEN_KEY = 'chinichi_access_token';
 const REFRESH_TOKEN_KEY = 'chinichi_refresh_token';
 

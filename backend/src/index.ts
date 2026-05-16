@@ -60,7 +60,10 @@ async function buildApp(): Promise<FastifyInstance> {
     origin:
       NODE_ENV === 'development'
         ? true // 开发环境允许所有来源
-        : (process.env['CORS_ORIGIN'] ?? 'https://chinichi.jp'),
+        : [
+            process.env['CORS_ORIGIN'] ?? 'https://chinichi.jp',
+            /\.vercel\.app$/, // 允许所有 Vercel 预览域名
+          ],
     credentials: true,
   });
 
