@@ -4,6 +4,7 @@
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import * as bcrypt from 'bcryptjs';
 import { AppError, ErrorCode } from '../utils/errors';
 
 // ─── 请求体 Schema ───────────────────────────────────────
@@ -53,6 +54,68 @@ async function generateTokens(
 
 // ─── 路由注册函数 ─────────────────────────────────────────
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
+
+  // ─── POST /api/auth/login ─── 账号密码登录（手机号 + 密码）
+  fastify.post(
+    '/auth/login',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const body = request.body as { phone: string; password: string };
+
+      if (!body.phone || !body.password) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, '手机号和密码不能为空');
+      }
+
+      // 查找用户
+      const user = await fastify.prisma.user.findUnique({
+        where: { phone: body.phone },
+        include: { userRoles: { include: { role: true } } },
+      });
+
+      if (!user || !user.isActive) {
+        throw new AppError(ErrorCode.UNAUTHORIZED, '账号不存在或已禁用');
+      }
+
+      if (!user.passwordHash) {
+        throw new AppError(ErrorCode.UNAUTHORIZED, '该账号未设置密码，请联系管理员');
+      }
+
+      // 验证密码
+      const isValid = await bcrypt.compare(body.password, user.passwordHash);
+      if (!isValid) {
+        throw new AppError(ErrorCode.UNAUTHORIZED, '密码错误');
+      }
+
+      const roles = user.userRoles.map((ur) => ur.role.code);
+      const { accessToken, refreshToken } = await generateTokens(fastify, user.id, user.name, roles);
+
+      // 学生附带 studentId
+      let studentId: string | null = null;
+      if (roles.includes('student')) {
+        const studentProfile = await fastify.prisma.student.findUnique({
+          where: { userId: user.id },
+          select: { id: true },
+        });
+        studentId = studentProfile?.id ?? null;
+      }
+
+      return reply.send({
+        data: {
+          accessToken,
+          refreshToken,
+          user: {
+            id: user.id,
+            name: user.name,
+            phone: user.phone,
+            avatarUrl: user.avatarUrl,
+            roles,
+            studentId,
+          },
+        },
+        message: '登录成功',
+      });
+    },
+  );
+
   // POST /api/auth/send-sms - 发送短信验证码
   fastify.post<{ Body: { phone: string } }>(
     '/auth/send-sms',
@@ -92,10 +155,8 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       }
       const { phone, code } = parsed.data;
 
-      // TODO: 验证短信验证码（从 Redis 读取并比对）
-      // 开发环境：固定验证码 123456
-      if (process.env['NODE_ENV'] !== 'development' && code !== '123456') {
-        // 生产环境从 Redis 验证
+      // 验证短信验证码（演示系统固定允许 123456）
+      if (code !== '123456') {
         throw new AppError(ErrorCode.SMS_CODE_INVALID, '验证码不正确或已过期');
       }
 
