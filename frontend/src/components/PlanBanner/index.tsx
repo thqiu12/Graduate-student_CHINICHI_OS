@@ -84,7 +84,7 @@ const ActiveBanner: React.FC<{
             <Tag color="success">已确认规划</Tag>
           </Space>
           <Text type="secondary">
-            阶段截止：{plan.endDate}
+            阶段截止：{plan.endDate?.slice(0, 10)}
             {daysLeft > 0
               ? `（还有 ${daysLeft} 天）`
               : daysLeft === 0

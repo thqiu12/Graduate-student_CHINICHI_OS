@@ -281,7 +281,7 @@ const StagesTab: React.FC<StagesTabProps> = ({ studentId, studentName }) => {
 
                     <div style={{ marginTop: 8 }}>
                       <Text type="secondary" style={{ fontSize: 12 }}>
-                        {plan.startDate} ～ {plan.endDate}
+                        {plan.startDate?.slice(0, 10)} ～ {plan.endDate?.slice(0, 10)}
                       </Text>
                       {plan.goal && (
                         <Text

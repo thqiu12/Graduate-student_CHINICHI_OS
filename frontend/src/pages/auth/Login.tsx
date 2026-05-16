@@ -77,9 +77,10 @@ const Login: React.FC = () => {
   // 开发环境快速登录（用真实手机号获取真实 token）
   const devLogin = async (role: string) => {
     const phoneMap: Record<string, string> = {
-      student:     '13900000003',
-      teacher:     '13900000002',
-      admin_total: '13900000001',
+      student:       '13900000003',
+      student_zhang: '13812345678', // 张思远（有 pending 规划）
+      teacher:       '13900000002',
+      admin_total:   '13900000001',
     };
     try {
       const res = await apiClient.post('/auth/phone-login', {
@@ -152,7 +153,10 @@ const Login: React.FC = () => {
               <Divider>开发环境快速登录</Divider>
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Button block onClick={() => devLogin('student')} style={{ background: '#1677ff', color: '#fff', border: 'none' }}>
-                  以学生身份登录
+                  学生：测试学生（已有规划）
+                </Button>
+                <Button block onClick={() => devLogin('student_zhang')} style={{ background: '#13c2c2', color: '#fff', border: 'none' }}>
+                  学生：张思远（规划待确认）
                 </Button>
                 <Button block onClick={() => devLogin('teacher')} style={{ background: '#52c41a', color: '#fff', border: 'none' }}>
                   以班主任身份登录

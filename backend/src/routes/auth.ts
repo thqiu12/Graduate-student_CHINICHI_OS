@@ -123,6 +123,16 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         roles,
       );
 
+      // 如果是学生角色，附带 studentId（Student 表的 ID）
+      let studentId: string | null = null;
+      if (roles.includes('student')) {
+        const studentProfile = await fastify.prisma.student.findUnique({
+          where: { userId: user.id },
+          select: { id: true },
+        });
+        studentId = studentProfile?.id ?? null;
+      }
+
       return reply.send({
         data: {
           accessToken,
@@ -133,6 +143,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
             phone: user.phone,
             avatarUrl: user.avatarUrl,
             roles,
+            studentId, // 学生角色时附带，其他角色为 null
           },
         },
         message: '登录成功',

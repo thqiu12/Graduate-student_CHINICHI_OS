@@ -92,15 +92,6 @@ const LockedTasksView: React.FC<{
         <Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
           班主任已为你制定了阶段计划，确认后才能查看具体待办任务。
         </Text>
-        <PlanBanner
-          studentId=""
-          plan={plan}
-          isStudentView
-          onViewDetail={(id) => navigate(`/student/plan-confirm/${id}`)}
-          onConfirm={onConfirm}
-          onReject={onReject}
-          loading={loading}
-        />
       </div>
     </Card>
   );
@@ -113,9 +104,8 @@ const StudentHomePage: React.FC = () => {
   const navigate = useNavigate();
   const [messageApi, contextHolder] = message.useMessage();
 
-  // 通过 user.id 获取对应学生档案（在实际应用中，学生 userId 对应 student.id 需要 API 映射）
-  // 这里假设 studentId 从用户信息中获取
-  const studentId = user?.id ?? '';
+  // studentId 是 Student 表的 ID（登录时后端附带），而非 User 表 ID
+  const studentId = user?.studentId ?? user?.id ?? '';
 
   const { data: plans, isLoading } = useStudentPlans(studentId);
 

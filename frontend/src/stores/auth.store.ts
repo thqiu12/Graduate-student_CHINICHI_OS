@@ -14,6 +14,7 @@ export interface AuthUser {
   phone?: string | null;
   avatarUrl?: string | null;
   roles: string[];
+  studentId?: string | null; // 学生角色专有，Student 表的 ID
 }
 
 export interface LoginResponse {

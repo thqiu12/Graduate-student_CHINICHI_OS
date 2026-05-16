@@ -147,7 +147,7 @@ const PlanConfirmPage: React.FC = () => {
   // 如果 URL 带有 ?action=reject，自动打开异议弹窗
   const autoReject = searchParams.get('action') === 'reject';
 
-  const studentId = user?.id ?? '';
+  const studentId = user?.studentId ?? user?.id ?? '';
   const { data: plans, isLoading } = useStudentPlans(studentId);
 
   const confirmMutation = useConfirmPlan(studentId);
@@ -263,8 +263,8 @@ const PlanConfirmPage: React.FC = () => {
             <Descriptions.Item label="状态">
               <Tag color={canConfirm ? 'warning' : 'success'}>{statusLabel}</Tag>
             </Descriptions.Item>
-            <Descriptions.Item label="开始日期">{currentPlan.startDate}</Descriptions.Item>
-            <Descriptions.Item label="截止日期">{currentPlan.endDate}</Descriptions.Item>
+            <Descriptions.Item label="开始日期">{currentPlan.startDate?.slice(0,10)}</Descriptions.Item>
+            <Descriptions.Item label="截止日期">{currentPlan.endDate?.slice(0,10)}</Descriptions.Item>
             <Descriptions.Item label="版本">第 {currentPlan.version} 版</Descriptions.Item>
             {currentPlan.confirmedAt && (
               <Descriptions.Item label="确认时间">

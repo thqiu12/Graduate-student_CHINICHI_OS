@@ -147,11 +147,11 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               }}
             >
               {overdue ? (
-                <Tooltip title={`截止日期：${task.dueDate}`}>
-                  <span>已逾期（截止 {task.dueDate}）</span>
+                <Tooltip title={`截止日期：${task.dueDate?.slice(0,10)}`}>
+                  <span>已逾期（截止 {task.dueDate?.slice(0,10)}）</span>
                 </Tooltip>
               ) : (
-                `截止 ${task.dueDate}${task.dueTime ? ` ${task.dueTime}` : ''}`
+                `截止 ${task.dueDate?.slice(0,10)}${task.dueTime ? ` ${task.dueTime}` : ''}`
               )}
             </Text>
           </Space>
