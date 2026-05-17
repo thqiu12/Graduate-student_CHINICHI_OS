@@ -29,6 +29,9 @@ const StudentDetailPage = lazy(() => import('./pages/teacher/StudentDetail'));
 const SubjectHeadDashboard = lazy(() => import('./pages/management/SubjectHeadDashboard'));
 const AdminDashboard = lazy(() => import('./pages/management/AdminDashboard'));
 
+// 共享
+const CalendarView = lazy(() => import('./pages/shared/CalendarView'));
+
 // ─── React Query Client ────────────────────────────────────
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -119,6 +122,7 @@ const App: React.FC = () => {
                     <Route path="/teacher" element={<TeacherDashboard />} />
                     <Route path="/teacher/students" element={<StudentListPage />} />
                     <Route path="/teacher/students/:id" element={<StudentDetailPage />} />
+                    <Route path="/teacher/calendar" element={<CalendarView />} />
                   </Route>
                 </Route>
 
@@ -127,6 +131,7 @@ const App: React.FC = () => {
                   <Route element={<AppLayout />}>
                     <Route path="/subject-head" element={<SubjectHeadDashboard />} />
                     <Route path="/admin" element={<AdminDashboard />} />
+                    <Route path="/admin/calendar" element={<CalendarView />} />
                   </Route>
                 </Route>
 

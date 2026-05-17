@@ -1,6 +1,6 @@
 // src/pages/student/PlanConfirm.tsx
 // 知日塾大学院考学进度管理系统 - 规划确认页（学生端）
-// 功能：查看规划详情 + 变更对比 + 确认/异议按钮
+// 功能：查看规划详情 + 变更对比（左右分栏 diff 高亮）+ 确认/异议按钮
 
 import React, { useState, useMemo } from 'react';
 import {
@@ -20,6 +20,7 @@ import {
   Row,
   Col,
   message,
+  Badge,
 } from 'antd';
 import {
   CheckCircleOutlined,
@@ -28,15 +29,211 @@ import {
   DiffOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useStudentPlans, useConfirmPlan, useRejectPlan, useToggleTask } from '../../api/plans.api';
 import { useAuthStore } from '../../stores/auth.store';
 import { TaskItem } from '../../components/TaskItem';
 import { PlanStatus, type PeriodPlan, PERIOD_LABELS, PLAN_STATUS_LABELS } from '../../types/plan';
+import apiClient from '../../api/client';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
 
-// ─── 变更对比组件 ─────────────────────────────────────────
+// ─── Diff API 类型 ────────────────────────────────────────
+
+interface DiffField {
+  field: string;
+  label: string;
+  oldValue: string | null;
+  newValue: string | null;
+}
+
+interface PlanDiffResponse {
+  data: {
+    current: PeriodPlan;
+    previous: PeriodPlan | null;
+    diffs: DiffField[];
+    changeReason: string | null;
+  };
+}
+
+function usePlanDiff(planId: string | undefined, enabled: boolean) {
+  return useQuery<PlanDiffResponse>({
+    queryKey: ['plan-diff', planId],
+    queryFn: async () => {
+      const res = await apiClient.get(`/plans/${planId}/diff`);
+      return res.data;
+    },
+    enabled: enabled && !!planId,
+    staleTime: 30 * 1000,
+  });
+}
+
+// ─── 左右分栏变更对比组件 ─────────────────────────────────
+
+interface FieldRowProps {
+  label: string;
+  oldValue: string | null;
+  newValue: string | null;
+  changed: boolean;
+}
+
+const FieldRow: React.FC<FieldRowProps> = ({ label, oldValue, newValue, changed }) => (
+  <Row gutter={0} style={{ marginBottom: 1, borderBottom: '1px solid #f0f0f0' }}>
+    {/* 字段名 */}
+    <Col
+      span={4}
+      style={{
+        padding: '8px 12px',
+        fontWeight: 600,
+        fontSize: 13,
+        background: '#fafafa',
+        display: 'flex',
+        alignItems: 'center',
+      }}
+    >
+      {label}
+      {changed && <Badge color="red" style={{ marginLeft: 4 }} />}
+    </Col>
+    {/* 旧值（左） */}
+    <Col
+      span={10}
+      style={{
+        padding: '8px 12px',
+        background: changed ? '#fff1f0' : '#fff',
+        borderLeft: '1px solid #f0f0f0',
+        borderRight: '1px solid #f0f0f0',
+      }}
+    >
+      {changed ? (
+        <Text delete type="secondary" style={{ whiteSpace: 'pre-wrap' }}>
+          {oldValue ?? '（空）'}
+        </Text>
+      ) : (
+        <Text style={{ color: '#333', whiteSpace: 'pre-wrap' }}>{oldValue ?? '（空）'}</Text>
+      )}
+    </Col>
+    {/* 新值（右） */}
+    <Col
+      span={10}
+      style={{
+        padding: '8px 12px',
+        background: changed ? '#f6ffed' : '#fff',
+      }}
+    >
+      {changed ? (
+        <Text style={{ color: '#389e0d', fontWeight: 600, whiteSpace: 'pre-wrap' }}>
+          {newValue ?? '（空）'}
+        </Text>
+      ) : (
+        <Text style={{ color: '#333', whiteSpace: 'pre-wrap' }}>{newValue ?? '（空）'}</Text>
+      )}
+    </Col>
+  </Row>
+);
+
+const DiffPanel: React.FC<{ planId: string | undefined }> = ({ planId }) => {
+  const { data: diffData, isLoading } = usePlanDiff(planId, true);
+
+  if (isLoading) {
+    return <Spin size="small" tip="加载变更对比..." />;
+  }
+
+  if (!diffData?.data) return null;
+
+  const { current, previous, diffs, changeReason } = diffData.data;
+
+  if (!previous) {
+    return (
+      <Alert
+        type="info"
+        message="无法获取上一版本规划，可能是首次变更。"
+        style={{ marginBottom: 16 }}
+      />
+    );
+  }
+
+  // 构造所有需要对比的字段（包含无变化字段）
+  const allFields: Array<{ field: string; label: string; oldValue: string | null; newValue: string | null }> = [
+    {
+      field: 'stageName',
+      label: '阶段名称',
+      oldValue: previous.stageName,
+      newValue: current.stageName,
+    },
+    {
+      field: 'startDate',
+      label: '开始日期',
+      oldValue: previous.startDate?.slice(0, 10) ?? null,
+      newValue: current.startDate?.slice(0, 10) ?? null,
+    },
+    {
+      field: 'endDate',
+      label: '截止日期',
+      oldValue: previous.endDate?.slice(0, 10) ?? null,
+      newValue: current.endDate?.slice(0, 10) ?? null,
+    },
+    {
+      field: 'goal',
+      label: '阶段目标',
+      oldValue: previous.goal ?? null,
+      newValue: current.goal ?? null,
+    },
+  ];
+
+  const changedFields = new Set(diffs.map((d) => d.field));
+
+  return (
+    <Card
+      title={
+        <Space>
+          <DiffOutlined />
+          <span>新旧版本对比</span>
+          {diffs.length > 0 && <Tag color="red">{diffs.length} 处变更</Tag>}
+        </Space>
+      }
+      size="small"
+      style={{ marginBottom: 16, border: '1px solid #d9d9d9' }}
+      bodyStyle={{ padding: 0 }}
+    >
+      {/* 表头 */}
+      <Row style={{ borderBottom: '2px solid #f0f0f0' }}>
+        <Col span={4} style={{ padding: '8px 12px', fontWeight: 700, fontSize: 12, color: '#888', background: '#fafafa' }}>字段</Col>
+        <Col span={10} style={{ padding: '8px 12px', fontWeight: 700, fontSize: 12, color: '#ff4d4f', background: '#fff1f0', borderLeft: '1px solid #f0f0f0', borderRight: '1px solid #f0f0f0' }}>
+          旧版本（v{previous.version}）
+        </Col>
+        <Col span={10} style={{ padding: '8px 12px', fontWeight: 700, fontSize: 12, color: '#52c41a', background: '#f6ffed' }}>
+          新版本（v{current.version}）
+        </Col>
+      </Row>
+
+      {allFields.map((f) => (
+        <FieldRow
+          key={f.field}
+          label={f.label}
+          oldValue={f.oldValue}
+          newValue={f.newValue}
+          changed={changedFields.has(f.field)}
+        />
+      ))}
+
+      {changeReason && (
+        <div style={{ padding: '10px 12px', background: '#fffbe6', borderTop: '1px solid #ffe58f' }}>
+          <Text strong style={{ color: '#faad14' }}>变更原因：</Text>
+          <Text style={{ color: '#614700' }}>{changeReason}</Text>
+        </div>
+      )}
+
+      {diffs.length === 0 && (
+        <div style={{ padding: '12px', color: '#888', textAlign: 'center', borderTop: '1px solid #f0f0f0' }}>
+          阶段基本信息无变化，可能仅调整了任务列表
+        </div>
+      )}
+    </Card>
+  );
+};
+
+// ─── 旧版变更对比组件（无 diff API 时的降级） ─────────────
 
 const ChangeCompare: React.FC<{
   currentPlan: PeriodPlan;
@@ -254,8 +451,8 @@ const PlanConfirmPage: React.FC = () => {
           />
         )}
 
-        {/* 变更对比（仅 change_pending 时显示） */}
-        {isChangePending && <ChangeCompare currentPlan={currentPlan} previousPlan={previousPlan} />}
+        {/* 变更对比（仅 change_pending 时显示）—— 使用 diff API 左右分栏对比 */}
+        {isChangePending && <DiffPanel planId={planId} />}
 
         {/* 规划基本信息 */}
         <Card title="规划基本信息" style={{ marginBottom: 16 }}>

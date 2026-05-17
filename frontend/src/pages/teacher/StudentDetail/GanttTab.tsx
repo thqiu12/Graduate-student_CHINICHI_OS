@@ -223,7 +223,6 @@ const GanttTab: React.FC<GanttTabProps> = ({ studentId, studentName }) => {
                 flexShrink: 0,
                 textAlign: 'center',
                 fontSize: 11,
-                color: '#666',
                 borderLeft: '1px solid #f0f0f0',
                 fontWeight: m.month === 0 ? 700 : 400,
                 color: m.month === 0 ? '#1677ff' : '#666',
