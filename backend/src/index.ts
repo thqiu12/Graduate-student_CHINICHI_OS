@@ -28,6 +28,10 @@ import { AppError } from './utils/errors';
 // BullMQ
 import { scheduleRecurringJobs, closeAllQueues } from './jobs/queue';
 import { createCheckUnsetPlansWorker } from './jobs/check-unset-plans.job';
+import { createCheckUnconfirmedPlansWorker } from './jobs/check-unconfirmed-plans.job';
+import { createCheckOverdueTasksWorker } from './jobs/check-overdue-tasks.job';
+import { createWeeklySummaryTeacherWorker } from './jobs/weekly-summary-teacher.job';
+import { createWeeklySummaryDeptWorker } from './jobs/weekly-summary-dept.job';
 
 const PORT = parseInt(process.env['PORT'] ?? '3000', 10);
 const HOST = process.env['HOST'] ?? '0.0.0.0';
@@ -162,8 +166,13 @@ async function start(): Promise<void> {
   if (NODE_ENV !== 'test') {
     try {
       await scheduleRecurringJobs();
+      // 注册所有 Worker
       createCheckUnsetPlansWorker(fastify.prisma);
-      fastify.log.info('BullMQ 定时任务已启动');
+      createCheckUnconfirmedPlansWorker(fastify.prisma);
+      createCheckOverdueTasksWorker(fastify.prisma);
+      createWeeklySummaryTeacherWorker(fastify.prisma);
+      createWeeklySummaryDeptWorker(fastify.prisma);
+      fastify.log.info('BullMQ 定时任务已启动（5个Worker）');
     } catch (err) {
       fastify.log.warn({ err }, 'BullMQ 启动失败（Redis 可能未连接）');
     }

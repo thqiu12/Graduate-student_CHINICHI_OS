@@ -1,6 +1,6 @@
 // src/jobs/check-unset-plans.job.ts
 // 知日塾大学院考学进度管理系统 - 未设定规划检查任务
-// 每天 9:00 扫描入塾>7天无规划的学生，通知学科负责人，写 operation_logs
+// 每天 9:00 扫描入塾>7天无规划的学生，通知班主任和学科负责人，防重（当天已通知则跳过）
 
 import { Worker, Job } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
@@ -17,6 +17,12 @@ export async function runCheckUnsetPlans(prisma: PrismaClient): Promise<void> {
 
   const thresholdDate = new Date();
   thresholdDate.setDate(thresholdDate.getDate() - DAYS_THRESHOLD);
+
+  // 今天的起止时间，用于防重查询
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
 
   // 查找：入塾超过 7 天，且没有任何 period_plan 记录的学生
   const studentsWithoutPlan = await prisma.student.findMany({
@@ -52,6 +58,9 @@ export async function runCheckUnsetPlans(prisma: PrismaClient): Promise<void> {
       (Date.now() - (student.entryDate?.getTime() ?? Date.now())) / (1000 * 60 * 60 * 24),
     );
 
+    // 查找当前班主任（teachers 关联中 endedAt=null 的第一个）
+    const currentTeacher = student.teachers[0]?.teacher ?? null;
+
     // 查找学科负责人
     const subjectHeads = await prisma.userRole.findMany({
       where: {
@@ -61,39 +70,71 @@ export async function runCheckUnsetPlans(prisma: PrismaClient): Promise<void> {
       include: { user: { select: { id: true, name: true } } },
     });
 
-    const alertContent = `【未设定规划告警】学生 ${student.user.name} 入塾已 ${entryDays} 天，班主任尚未设定考学规划。请督促班主任尽快制定规划。`;
+    const alertContent = `【未设定规划告警】学生 ${student.user.name} 入塾已 ${entryDays} 天，尚未设定考学规划。请尽快制定规划。`;
 
-    // 发送站内通知给学科负责人
+    // 收集所有需要通知的用户（班主任 + 学科负责人）
+    const recipientIds: string[] = [];
+    if (currentTeacher) {
+      recipientIds.push(currentTeacher.id);
+    }
     for (const head of subjectHeads) {
-      await prisma.notification.create({
-        data: {
-          userId: head.userId,
-          type: 'alert_no_plan',
-          title: `[告警] ${student.user.name} 入塾 ${entryDays} 天未设定规划`,
-          content: alertContent,
-          relatedId: student.id,
-        },
-      });
+      if (!recipientIds.includes(head.userId)) {
+        recipientIds.push(head.userId);
+      }
     }
 
-    // 如果没有学科负责人，通知教务总负责人
-    if (subjectHeads.length === 0) {
+    // 如果没有班主任和学科负责人，回落到管理员
+    if (recipientIds.length === 0) {
       const adminUsers = await prisma.userRole.findMany({
         where: { role: { code: 'admin_total' } },
         include: { user: { select: { id: true, name: true } } },
       });
-
       for (const admin of adminUsers) {
-        await prisma.notification.create({
-          data: {
-            userId: admin.userId,
-            type: 'alert_no_plan',
-            title: `[升级告警] ${student.user.name} 入塾 ${entryDays} 天未设定规划（无学科负责人）`,
-            content: alertContent + '（注意：该学科暂无负责人，告警已升级）',
-            relatedId: student.id,
-          },
-        });
+        recipientIds.push(admin.userId);
       }
+    }
+
+    let notifiedCount = 0;
+
+    for (const recipientId of recipientIds) {
+      // 防重：查询当天是否已有同类通知
+      const existingNotification = await prisma.notification.findFirst({
+        where: {
+          userId: recipientId,
+          type: 'alert_no_plan',
+          relatedId: student.id,
+          createdAt: {
+            gte: todayStart,
+            lte: todayEnd,
+          },
+        },
+      });
+
+      if (existingNotification) {
+        // 当天已通知，跳过
+        console.log(
+          `[check-unset-plans] 学生 ${student.user.name} 今日已通知用户 ${recipientId}，跳过`,
+        );
+        continue;
+      }
+
+      // 判断接收者角色决定标题
+      const isTeacher = currentTeacher?.id === recipientId;
+      const title = isTeacher
+        ? `[提醒] 学生 ${student.user.name} 入塾 ${entryDays} 天未设定规划`
+        : `[告警] ${student.user.name} 入塾 ${entryDays} 天未设定规划`;
+
+      await prisma.notification.create({
+        data: {
+          userId: recipientId,
+          type: 'alert_no_plan',
+          title,
+          content: alertContent,
+          relatedId: student.id,
+        },
+      });
+
+      notifiedCount++;
     }
 
     // 写入操作日志
@@ -110,14 +151,16 @@ export async function runCheckUnsetPlans(prisma: PrismaClient): Promise<void> {
           entryDate: student.entryDate,
           subjectName: student.subject?.name,
           campusName: student.campus?.name,
+          teacherName: currentTeacher?.name ?? null,
           alertSentTo: subjectHeads.map((h) => ({ id: h.userId, name: h.user.name })),
+          notifiedCount,
           triggeredAt: new Date().toISOString(),
         },
       },
     });
 
     console.log(
-      `[check-unset-plans] 已告警：学生 ${student.user.name}（入塾${entryDays}天），通知了 ${subjectHeads.length} 位学科负责人`,
+      `[check-unset-plans] 已告警：学生 ${student.user.name}（入塾${entryDays}天），新通知 ${notifiedCount} 位用户`,
     );
   }
 

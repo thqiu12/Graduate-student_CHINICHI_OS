@@ -132,6 +132,117 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // ─── GET /api/stats/calendar ─── 日历视图事件接口
+  fastify.get(
+    '/stats/calendar',
+    {
+      preHandler: [
+        authenticate,
+        authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER]),
+      ],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const query = request.query as { start?: string; end?: string };
+      const start = query.start ? new Date(query.start) : new Date(Date.now() - 90 * 24 * 3600 * 1000);
+      const end = query.end ? new Date(query.end) : new Date(Date.now() + 180 * 24 * 3600 * 1000);
+
+      const events: Array<{
+        date: string;
+        type: 'task_due' | 'school_apply' | 'exam' | 'plan_end';
+        studentName: string;
+        title: string;
+        detail: string;
+      }> = [];
+
+      // 1. 任务截止（task_due）—— 红点
+      const tasks = await fastify.prisma.periodPlanTask.findMany({
+        where: {
+          dueDate: { gte: start, lte: end },
+          status: { not: 'done' },
+        },
+        include: {
+          plan: {
+            include: {
+              student: { include: { user: { select: { name: true } } } },
+            },
+          },
+        },
+      });
+      for (const t of tasks) {
+        if (!t.dueDate) continue;
+        events.push({
+          date: t.dueDate.toISOString().slice(0, 10),
+          type: 'task_due',
+          studentName: t.plan.student.user?.name ?? '未知',
+          title: t.title,
+          detail: `任务截止：${t.title}（${t.priority}优先级）`,
+        });
+      }
+
+      // 2. 出愿截止（school_apply）—— 黄点
+      const schools = await fastify.prisma.targetSchool.findMany({
+        where: {
+          applicationEnd: { gte: start, lte: end },
+        },
+        include: {
+          student: { include: { user: { select: { name: true } } } },
+        },
+      });
+      for (const s of schools) {
+        if (!s.applicationEnd) continue;
+        events.push({
+          date: s.applicationEnd.toISOString().slice(0, 10),
+          type: 'school_apply',
+          studentName: s.student.user?.name ?? '未知',
+          title: s.universityName,
+          detail: `出愿截止：${s.universityName}${s.department ? ' ' + s.department : ''}`,
+        });
+      }
+
+      // 3. 考试日期（exam）—— 绿点
+      const examSchools = await fastify.prisma.targetSchool.findMany({
+        where: {
+          examDate: { gte: start, lte: end },
+        },
+        include: {
+          student: { include: { user: { select: { name: true } } } },
+        },
+      });
+      for (const s of examSchools) {
+        if (!s.examDate) continue;
+        events.push({
+          date: s.examDate.toISOString().slice(0, 10),
+          type: 'exam',
+          studentName: s.student.user?.name ?? '未知',
+          title: s.universityName,
+          detail: `考试日期：${s.universityName}${s.department ? ' ' + s.department : ''}`,
+        });
+      }
+
+      // 4. 阶段结束（plan_end）—— 蓝点
+      const plans = await fastify.prisma.periodPlan.findMany({
+        where: {
+          endDate: { gte: start, lte: end },
+          status: { in: ['active', 'pending', 'change_pending'] },
+        },
+        include: {
+          student: { include: { user: { select: { name: true } } } },
+        },
+      });
+      for (const p of plans) {
+        events.push({
+          date: p.endDate.toISOString().slice(0, 10),
+          type: 'plan_end',
+          studentName: p.student.user?.name ?? '未知',
+          title: p.stageName,
+          detail: `阶段结束：${p.stageName}（${p.periodCode}）`,
+        });
+      }
+
+      return reply.send({ data: events });
+    },
+  );
+
   // ─── GET /api/stats/teacher-dashboard ─── 班主任看板专用统计
   // 返回：阶段分布 + 内诺状态分布（仅理科学生的志望校内诺）
   fastify.get(

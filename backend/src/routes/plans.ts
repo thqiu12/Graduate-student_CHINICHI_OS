@@ -741,6 +741,88 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
+  // ─── GET /api/plans/:planId/diff ─── 规划变更Diff（新旧版本对比）
+  fastify.get<{ Params: { planId: string } }>(
+    '/plans/:planId/diff',
+    {
+      preHandler: [
+        authenticate,
+        authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER, Roles.STUDENT]),
+      ],
+    },
+    async (
+      request: FastifyRequest<{ Params: { planId: string } }>,
+      reply: FastifyReply,
+    ) => {
+      const { planId } = request.params;
+      const user = request.user as JwtPayload;
+
+      const currentPlan = await fastify.prisma.periodPlan.findUnique({
+        where: { id: planId },
+        include: { tasks: { orderBy: { sortOrder: 'asc' } } },
+      });
+
+      if (!currentPlan) {
+        throw createError.notFound('规划', planId);
+      }
+
+      // 学生只能查看自己的规划
+      if (user.roles.includes(Roles.STUDENT)) {
+        const student = await fastify.prisma.student.findFirst({
+          where: { id: currentPlan.studentId, userId: user.sub },
+        });
+        if (!student) {
+          throw createError.forbidden('只能查看自己的规划');
+        }
+      }
+
+      let previousPlan = null;
+      if (currentPlan.previousPlanId) {
+        previousPlan = await fastify.prisma.periodPlan.findUnique({
+          where: { id: currentPlan.previousPlanId },
+          include: { tasks: { orderBy: { sortOrder: 'asc' } } },
+        });
+      }
+
+      // 计算字段差异
+      const diffs: Array<{ field: string; label: string; oldValue: string | null; newValue: string | null }> = [];
+
+      if (previousPlan) {
+        const compare = (field: string, label: string, oldVal: any, newVal: any) => {
+          const o = oldVal !== null && oldVal !== undefined ? String(oldVal) : null;
+          const n = newVal !== null && newVal !== undefined ? String(newVal) : null;
+          if (o !== n) {
+            diffs.push({ field, label, oldValue: o, newValue: n });
+          }
+        };
+
+        compare('stageName', '阶段名称', previousPlan.stageName, currentPlan.stageName);
+        compare('goal', '阶段目标', previousPlan.goal, currentPlan.goal);
+        compare(
+          'startDate',
+          '开始日期',
+          previousPlan.startDate?.toISOString().slice(0, 10),
+          currentPlan.startDate?.toISOString().slice(0, 10),
+        );
+        compare(
+          'endDate',
+          '截止日期',
+          previousPlan.endDate?.toISOString().slice(0, 10),
+          currentPlan.endDate?.toISOString().slice(0, 10),
+        );
+      }
+
+      return reply.send({
+        data: {
+          current: currentPlan,
+          previous: previousPlan,
+          diffs,
+          changeReason: currentPlan.changeReason,
+        },
+      });
+    },
+  );
+
   // ─── DELETE /students/:studentId/tasks/:taskId ─── 删除任务（班主任）
   fastify.delete(
     '/students/:studentId/tasks/:taskId',
