@@ -91,6 +91,36 @@ async function writeOperationLog(
   });
 }
 
+async function createInAppNotification(
+  fastify: FastifyInstance,
+  data: {
+    userId: string;
+    type: string;
+    title: string;
+    content?: string | null;
+    relatedId?: string | null;
+  },
+): Promise<void> {
+  const notification = await fastify.prisma.notification.create({
+    data: {
+      userId: data.userId,
+      type: data.type,
+      title: data.title,
+      content: data.content ?? null,
+      relatedId: data.relatedId ?? null,
+    },
+  });
+
+  await fastify.prisma.notificationDelivery.create({
+    data: {
+      notificationId: notification.id,
+      channel: 'in_app',
+      status: 'sent',
+      sentAt: new Date(),
+    },
+  });
+}
+
 async function ensureNoPendingPlanChange(
   fastify: FastifyInstance,
   studentId: string,
@@ -218,14 +248,12 @@ async function createTaskChangePlan(
   });
 
   if (studentRecord) {
-    await fastify.prisma.notification.create({
-      data: {
-        userId: studentRecord.userId,
-        type: 'plan_change_pending',
-        title: '规划任务已更新，需要重新确认',
-        content: `班主任对「${sourcePlan.stageName}」规划任务进行了调整，请查看变更内容并确认。`,
-        relatedId: newPlan.id,
-      },
+    await createInAppNotification(fastify, {
+      userId: studentRecord.userId,
+      type: 'plan_change_pending',
+      title: '规划任务已更新，需要重新确认',
+      content: `班主任对「${sourcePlan.stageName}」规划任务进行了调整，请查看变更内容并确认。`,
+      relatedId: newPlan.id,
     });
   }
 
@@ -426,14 +454,12 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       if (studentUser) {
-        await fastify.prisma.notification.create({
-          data: {
-            userId: studentUser.userId,
-            type: 'plan_pending',
-            title: '新阶段规划待确认',
-            content: `班主任为你制定了「${plan.stageName}」的阶段规划，请查看并确认。`,
-            relatedId: planId,
-          },
+        await createInAppNotification(fastify, {
+          userId: studentUser.userId,
+          type: 'plan_pending',
+          title: '新阶段规划待确认',
+          content: `班主任为你制定了「${plan.stageName}」的阶段规划，请查看并确认。`,
+          relatedId: planId,
         });
       }
 
@@ -614,14 +640,12 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       if (teacherRelation) {
-        await fastify.prisma.notification.create({
-          data: {
-            userId: teacherRelation.teacherId,
-            type: 'plan_rejected',
-            title: '学生对规划提出异议',
-            content: `学生对「${plan.stageName}」规划提出异议：${parsed.data.content}`,
-            relatedId: studentId,
-          },
+        await createInAppNotification(fastify, {
+          userId: teacherRelation.teacherId,
+          type: 'plan_rejected',
+          title: '学生对规划提出异议',
+          content: `学生对「${plan.stageName}」规划提出异议：${parsed.data.content}`,
+          relatedId: studentId,
         });
       }
 
@@ -716,14 +740,12 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       if (studentRecord) {
-        await fastify.prisma.notification.create({
-          data: {
-            userId: studentRecord.userId,
-            type: 'plan_change_pending',
-            title: '规划已更新，需要重新确认',
-            content: `班主任对「${plan.stageName}」规划进行了调整，请查看变更内容并确认。`,
-            relatedId: newPlan.id,
-          },
+        await createInAppNotification(fastify, {
+          userId: studentRecord.userId,
+          type: 'plan_change_pending',
+          title: '规划已更新，需要重新确认',
+          content: `班主任对「${plan.stageName}」规划进行了调整，请查看变更内容并确认。`,
+          relatedId: newPlan.id,
         });
       }
 
