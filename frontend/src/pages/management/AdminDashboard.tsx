@@ -1,7 +1,7 @@
 // src/pages/management/AdminDashboard.tsx
 // 知日塾大学院考学进度管理系统 - 教务总负责人看板
 
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Row, Col, Card, Statistic, Table, Tag, Button, Typography, Alert,
   Progress, Divider, message, Space, Spin,
@@ -13,22 +13,46 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useStatsOverview, useExamSeasonStats, useAlerts } from '../../api/stats.api';
 import apiClient, { getErrorMessage } from '../../api/client';
+import { useStudents } from '../../api/students.api';
+import StudentDrilldownDrawer, {
+  getLatestPlan,
+  hasInnoStatus,
+  type StudentDrilldownState,
+} from './StudentDrilldownDrawer';
 
 const { Title, Text } = Typography;
 
 const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [messageApi, ctxHolder] = message.useMessage();
+  const [studentDrawer, setStudentDrawer] = useState<StudentDrilldownState | null>(null);
   const { data: overview, isLoading } = useStatsOverview();
   const { data: examStats } = useExamSeasonStats();
   const { data: alerts } = useAlerts();
-
-  if (isLoading) return <div style={{ padding: 40, textAlign: 'center' }}><Spin size="large" /></div>;
+  const { data: studentsData, isLoading: studentsLoading } = useStudents({ pageSize: 1000 });
 
   const summer = examStats?.data?.summer;
   const winter = examStats?.data?.winter;
   const noPlan = alerts?.noPlan ?? [];
   const pendingTooLong = alerts?.pendingTooLong ?? [];
+  const students = studentsData?.data ?? [];
+  const riskStudents = useMemo(
+    () => students.filter((student) => (student.riskTags?.length ?? 0) > 0),
+    [students],
+  );
+  const noPlanStudents = useMemo(
+    () => students.filter((student) => !student.periodPlans?.length),
+    [students],
+  );
+  const activePlanStudents = useMemo(
+    () => students.filter((student) => getLatestPlan(student, 'active')),
+    [students],
+  );
+  const openStudentDrawer = (title: string, list: typeof students, description?: string) => {
+    setStudentDrawer({ title, students: list, description });
+  };
+
+  if (isLoading) return <div style={{ padding: 40, textAlign: 'center' }}><Spin size="large" /></div>;
 
   const handleExport = async () => {
     try {
@@ -66,23 +90,23 @@ const AdminDashboard: React.FC = () => {
         {/* 全校统计卡片 */}
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           <Col xs={24} sm={12} lg={6}>
-            <Card>
-              <Statistic title="全校学生" value={overview?.totalStudents ?? 0} prefix={<TeamOutlined />} valueStyle={{ color: '#1677ff' }} />
+            <Card hoverable onClick={() => openStudentDrawer('全校学生', students, '当前全校学生列表')}>
+              <Statistic title="全校学生" value={overview?.totalStudents ?? students.length} prefix={<TeamOutlined />} valueStyle={{ color: '#1677ff' }} loading={studentsLoading} />
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card>
-              <Statistic title="风险学生" value={overview?.riskStudents ?? 0} prefix={<WarningOutlined />} valueStyle={{ color: '#ff4d4f' }} />
+            <Card hoverable onClick={() => openStudentDrawer('风险学生', riskStudents, '当前存在未解除风险标签的学生')}>
+              <Statistic title="风险学生" value={overview?.riskStudents ?? riskStudents.length} prefix={<WarningOutlined />} valueStyle={{ color: '#ff4d4f' }} loading={studentsLoading} />
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card>
-              <Statistic title="无规划学生" value={overview?.noRecentPlanStudents ?? 0} prefix={<ClockCircleOutlined />} valueStyle={{ color: '#fa8c16' }} />
+            <Card hoverable onClick={() => openStudentDrawer('无规划学生', noPlanStudents, '暂无规划记录的学生')}>
+              <Statistic title="无规划学生" value={overview?.noRecentPlanStudents ?? noPlanStudents.length} prefix={<ClockCircleOutlined />} valueStyle={{ color: '#fa8c16' }} loading={studentsLoading} />
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card>
-              <Statistic title="规划执行中" value={overview?.planStats?.['active'] ?? 0} prefix={<TrophyOutlined />} valueStyle={{ color: '#52c41a' }} />
+            <Card hoverable onClick={() => openStudentDrawer('规划执行中', activePlanStudents, '存在 active 状态规划的学生')}>
+              <Statistic title="规划执行中" value={overview?.planStats?.['active'] ?? activePlanStudents.length} prefix={<TrophyOutlined />} valueStyle={{ color: '#52c41a' }} loading={studentsLoading} />
             </Card>
           </Col>
         </Row>
@@ -92,7 +116,15 @@ const AdminDashboard: React.FC = () => {
           <Col xs={24} lg={8}>
             <Card title="规划状态分布">
               {planStatData.map(item => (
-                <div key={item.status} style={{ marginBottom: 12 }}>
+                <div
+                  key={item.status}
+                  onClick={() => openStudentDrawer(
+                    `${item.label}规划`,
+                    students.filter((student) => getLatestPlan(student, item.status)),
+                    `存在${item.label}状态规划的学生`,
+                  )}
+                  style={{ marginBottom: 12, cursor: 'pointer' }}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                     <Text>{item.label}</Text>
                     <Text strong>{item.count} 份</Text>
@@ -110,7 +142,10 @@ const AdminDashboard: React.FC = () => {
           {/* 考试季统计 */}
           <Col xs={24} lg={8}>
             <Card title="考试季内诺统计">
-              <div style={{ marginBottom: 20 }}>
+              <div
+                onClick={() => openStudentDrawer('夏季考已内诺学生', students.filter((student) => student.targetSeason === 'summer' && hasInnoStatus(student, 'confirmed')), '目标考季为夏季考且已有内诺记录的学生')}
+                style={{ marginBottom: 20, cursor: 'pointer' }}
+              >
                 <Text strong>🌸 夏季考</Text>
                 <Progress
                   percent={parseInt(summer?.innoRate ?? '0')}
@@ -123,7 +158,10 @@ const AdminDashboard: React.FC = () => {
                 </Text>
               </div>
               <Divider style={{ margin: '8px 0' }} />
-              <div>
+              <div
+                onClick={() => openStudentDrawer('冬季考已内诺学生', students.filter((student) => student.targetSeason === 'winter' && hasInnoStatus(student, 'confirmed')), '目标考季为冬季考且已有内诺记录的学生')}
+                style={{ cursor: 'pointer' }}
+              >
                 <Text strong>❄️ 冬季考</Text>
                 <Progress
                   percent={parseInt(winter?.innoRate ?? '0')}
@@ -146,7 +184,7 @@ const AdminDashboard: React.FC = () => {
                   type="error"
                   message={`⚡ ${noPlan.length} 名学生超7天无规划`}
                   style={{ marginBottom: 8 }}
-                  action={<Button size="small" type="link" onClick={() => navigate('/teacher/students')}>处理</Button>}
+                  action={<Button size="small" type="link" onClick={() => openStudentDrawer('超7天无规划', students.filter((student) => noPlan.some((item) => item.id === student.id)), '全局预警中的无规划学生')}>查看</Button>}
                 />
               )}
               {pendingTooLong.length > 0 && (
@@ -154,7 +192,7 @@ const AdminDashboard: React.FC = () => {
                   type="warning"
                   message={`⏳ ${pendingTooLong.length} 名学生规划超3天待确认`}
                   style={{ marginBottom: 8 }}
-                  action={<Button size="small" type="link" onClick={() => navigate('/teacher/students')}>处理</Button>}
+                  action={<Button size="small" type="link" onClick={() => openStudentDrawer('超3天待确认', students.filter((student) => pendingTooLong.some((item) => item.id === student.id)), '全局预警中的待确认超时学生')}>查看</Button>}
                 />
               )}
               {noPlan.length === 0 && pendingTooLong.length === 0 && (
@@ -180,6 +218,7 @@ const AdminDashboard: React.FC = () => {
           </Col>
         </Row>
       </div>
+      <StudentDrilldownDrawer state={studentDrawer} onClose={() => setStudentDrawer(null)} />
     </>
   );
 };

@@ -48,6 +48,9 @@ assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', '已上传�
 assertContains('frontend/src/pages/teacher/Dashboard.tsx', 'studentDrawer');
 assertContains('frontend/src/pages/teacher/Dashboard.tsx', 'openStageStudents');
 assertContains('backend/src/routes/students.ts', 'targetSchools');
+assertContains('frontend/src/pages/management/StudentDrilldownDrawer.tsx', 'StudentDrilldownDrawer');
+assertContains('frontend/src/pages/management/SubjectHeadDashboard.tsx', 'openStudentDrawer');
+assertContains('frontend/src/pages/management/AdminDashboard.tsx', 'openStudentDrawer');
 assertContains('backend/src/routes/plans.ts', 'PlanStatus.cancelled');
 assertContains('backend/src/routes/plans.ts', 'createInAppNotification');
 assertContains('backend/src/utils/notifications.ts', 'notificationDelivery.create');

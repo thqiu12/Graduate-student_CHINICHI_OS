@@ -17,6 +17,9 @@ export interface StudentListItem {
   undergradMajor?: string;
   undergradGpa?: number;
   user: { id: string; name: string; phone?: string };
+  campus?: { id: number; name: string } | null;
+  subject?: { id: number; name: string } | null;
+  teachers?: Array<{ teacherId?: string; teacher?: { id: string; name: string } | null }>;
   riskTags?: Array<{ tag: { code: string; label: string; color?: string } }>;
   periodPlans?: Array<{ id: string; status: string; sentAt?: string; periodCode?: string; stageName?: string }>;
   targetSchools?: Array<{

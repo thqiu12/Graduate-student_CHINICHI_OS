@@ -228,8 +228,8 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
               include: { tag: true },
             },
             periodPlans: {
-              where: { status: { in: ['pending', 'change_pending', 'active'] } },
-              take: 3,
+              where: { status: { in: ['draft', 'pending', 'change_pending', 'active', 'completed', 'cancelled'] } },
+              take: 5,
               orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
             },
             targetSchools: {
