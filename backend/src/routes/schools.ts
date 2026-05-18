@@ -123,27 +123,47 @@ export async function schoolRoutes(fastify: FastifyInstance): Promise<void> {
       });
       if (!node) throw new AppError(ErrorCode.NOT_FOUND, '进度节点不存在', 404);
 
-      const updated = await fastify.prisma.schoolProgressNode.update({
-        where: { id: node.id },
-        data: {
-          isDone: body.isDone,
-          doneAt: body.isDone ? new Date() : null,
-          doneBy: body.isDone ? user.sub : null,
-        },
-      });
-
-      await fastify.prisma.operationLog.create({
-        data: {
-          studentId: id,
-          actorId: user.sub,
-          actionType: 'school_node_update',
-          detail: {
-            schoolId: sid,
-            nodeId: node.id,
-            nodeName: node.nodeName,
+      const updated = await fastify.prisma.$transaction(async (tx) => {
+        const progressNode = await tx.schoolProgressNode.update({
+          where: { id: node.id },
+          data: {
             isDone: body.isDone,
-          } as any,
-        },
+            doneAt: body.isDone ? new Date() : null,
+            doneBy: body.isDone ? user.sub : null,
+          },
+        });
+
+        if (node.nodeCode === 'inno') {
+          await tx.innoTracking.upsert({
+            where: { schoolId: sid },
+            create: {
+              schoolId: sid,
+              status: body.isDone ? 'confirmed' : 'not_started',
+              confirmedAt: body.isDone ? new Date() : null,
+            },
+            update: {
+              status: body.isDone ? 'confirmed' : 'in_progress',
+              confirmedAt: body.isDone ? new Date() : null,
+            },
+          });
+        }
+
+        await tx.operationLog.create({
+          data: {
+            studentId: id,
+            actorId: user.sub,
+            actionType: 'school_node_update',
+            detail: {
+              schoolId: sid,
+              nodeId: node.id,
+              nodeName: node.nodeName,
+              isDone: body.isDone,
+              syncedInno: node.nodeCode === 'inno',
+            } as any,
+          },
+        });
+
+        return progressNode;
       });
 
       return reply.send({ data: updated, message: '志望校进度已更新' });

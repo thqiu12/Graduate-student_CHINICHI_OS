@@ -213,11 +213,85 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         throw new AppError(ErrorCode.NOT_FOUND, '文件实体不存在，请联系管理员重新上传', 404);
       }
 
+      const user = request.user as JwtPayload;
+      await fastify.prisma.operationLog.create({
+        data: {
+          studentId: id,
+          actorId: user.sub,
+          actorName: user.name,
+          actionType: 'file_download',
+          targetType: 'file',
+          targetId: fileId,
+          detail: {
+            fileId,
+            versionId,
+            displayName: file.displayName,
+            versionNo: version.versionNo,
+          } as any,
+        },
+      });
+
       return reply
         .header('Content-Type', version.mimeType ?? 'application/octet-stream')
         .header('Content-Length', version.fileSize?.toString() ?? undefined)
         .header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.displayName)}`)
         .send(fs.createReadStream(version.ossKey));
+    },
+  );
+
+  // DELETE /api/students/:id/files/:fileId
+  fastify.delete(
+    '/students/:id/files/:fileId',
+    { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER, Roles.STUDENT])] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { id, fileId } = request.params as { id: string; fileId: string };
+      await assertStudentAccess(fastify, user, id);
+
+      const file = await fastify.prisma.file.findFirst({
+        where: { id: fileId, studentId: id },
+        include: { versions: true },
+      });
+      if (!file) {
+        throw new AppError(ErrorCode.NOT_FOUND, '文件不存在', 404);
+      }
+
+      if (user.roles.includes(Roles.STUDENT) && file.uploadedBy !== user.sub) {
+        throw new AppError(ErrorCode.FORBIDDEN, '只能删除自己上传的文件', 403);
+      }
+
+      await fastify.prisma.$transaction(async (tx) => {
+        await tx.fileVersion.deleteMany({ where: { fileId } });
+        await tx.file.delete({ where: { id: fileId } });
+        await tx.operationLog.create({
+          data: {
+            studentId: id,
+            actorId: user.sub,
+            actorName: user.name,
+            actionType: 'file_delete',
+            targetType: 'file',
+            targetId: fileId,
+            detail: {
+              fileId,
+              displayName: file.displayName,
+              fileType: file.fileType,
+              versionCount: file.versions.length,
+            } as any,
+          },
+        });
+      });
+
+      for (const version of file.versions) {
+        if (fs.existsSync(version.ossKey)) {
+          try {
+            fs.unlinkSync(version.ossKey);
+          } catch (err) {
+            fastify.log.warn({ err, fileId, versionId: version.id }, '文件实体删除失败');
+          }
+        }
+      }
+
+      return reply.send({ message: '文件已删除' });
     },
   );
 }

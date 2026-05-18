@@ -5,10 +5,10 @@
 import React, { useState } from 'react';
 import {
   Card, Typography, Empty, Spin, Tag, Space, Button, Upload, message,
-  List, Divider,
+  List, Divider, Popconfirm, Select, Input,
 } from 'antd';
 import {
-  DownloadOutlined, UploadOutlined, FileTextOutlined, FilePdfOutlined, FileOutlined,
+  DeleteOutlined, DownloadOutlined, UploadOutlined, FileTextOutlined, FilePdfOutlined, FileOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/auth.store';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -22,6 +22,14 @@ interface UploadChangeInfo {
 }
 
 const { Title, Text } = Typography;
+
+const FILE_TYPE_OPTIONS = [
+  { value: 'research_plan', label: '研究计划书' },
+  { value: 'transcript', label: '成绩单' },
+  { value: 'recommendation', label: '推荐信' },
+  { value: 'language_score', label: '语言成绩证明' },
+  { value: 'certificate', label: '证明文件' },
+];
 
 // ─── 类型 ─────────────────────────────────────────────────
 interface FileVersion {
@@ -65,6 +73,8 @@ const FilesPage: React.FC = () => {
   const studentId = user?.studentId ?? user?.id ?? '';
   const queryClient = useQueryClient();
   const [uploading, setUploading] = useState(false);
+  const [uploadFileType, setUploadFileType] = useState('research_plan');
+  const [uploadDescription, setUploadDescription] = useState('');
   const [messageApi, contextHolder] = message.useMessage();
 
   const { data, isLoading } = useQuery<FilesResponse>({
@@ -82,6 +92,7 @@ const FilesPage: React.FC = () => {
     setUploading(false);
     if (status === 'done') {
       messageApi.success(`${info.file.name} 上传成功`);
+      setUploadDescription('');
       queryClient.invalidateQueries({ queryKey: ['student-files', studentId] });
     } else if (status === 'error') {
       const errMsg = response?.message ?? '上传失败，请重试';
@@ -108,6 +119,16 @@ const FilesPage: React.FC = () => {
     }
   };
 
+  const handleDelete = async (file: StudentFile) => {
+    try {
+      await apiClient.delete(`/students/${studentId}/files/${file.id}`);
+      messageApi.success('文件已删除');
+      queryClient.invalidateQueries({ queryKey: ['student-files', studentId] });
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '删除失败，请稍后重试'));
+    }
+  };
+
   const token = tokenStorage.getToken() ?? '';
 
   if (isLoading) {
@@ -128,18 +149,33 @@ const FilesPage: React.FC = () => {
       <div style={{ padding: '16px 16px 80px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <Title level={4} style={{ margin: 0 }}>我的文件</Title>
-          <Upload
-            action={`/api/students/${studentId}/files`}
-            headers={{ Authorization: `Bearer ${token}` }}
-            data={{ fileType: 'research_plan', description: '' }}
-            showUploadList={false}
-            onChange={handleUpload}
-            accept=".pdf,.doc,.docx,.txt,.zip,.png,.jpg"
-          >
-            <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
-              上传文件
-            </Button>
-          </Upload>
+          <Space wrap>
+            <Select
+              value={uploadFileType}
+              onChange={setUploadFileType}
+              options={FILE_TYPE_OPTIONS}
+              style={{ width: 150 }}
+            />
+            <Input
+              value={uploadDescription}
+              onChange={(event) => setUploadDescription(event.target.value)}
+              placeholder="文件名/备注"
+              allowClear
+              style={{ width: 180 }}
+            />
+            <Upload
+              action={`/api/students/${studentId}/files`}
+              headers={{ Authorization: `Bearer ${token}` }}
+              data={{ fileType: uploadFileType, description: uploadDescription }}
+              showUploadList={false}
+              onChange={handleUpload}
+              accept=".pdf,.doc,.docx,.txt,.zip,.png,.jpg"
+            >
+              <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
+                上传文件
+              </Button>
+            </Upload>
+          </Space>
         </div>
 
         {totalCount === 0 ? (
@@ -208,13 +244,24 @@ const FilesPage: React.FC = () => {
                               </Space>
                             </div>
                             {latestVer && (
-                              <Button
-                                icon={<DownloadOutlined />}
-                                size="small"
-                                onClick={() => handleDownload(file, latestVer)}
-                              >
-                                下载
-                              </Button>
+                              <Space>
+                                <Button
+                                  icon={<DownloadOutlined />}
+                                  size="small"
+                                  onClick={() => handleDownload(file, latestVer)}
+                                >
+                                  下载
+                                </Button>
+                                <Popconfirm
+                                  title="确定删除此文件？"
+                                  description="删除后文件和版本记录都将移除。"
+                                  onConfirm={() => handleDelete(file)}
+                                  okText="删除"
+                                  cancelText="取消"
+                                >
+                                  <Button danger icon={<DeleteOutlined />} size="small" />
+                                </Popconfirm>
+                              </Space>
                             )}
                           </div>
                         </List.Item>
