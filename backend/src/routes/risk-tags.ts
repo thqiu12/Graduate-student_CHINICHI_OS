@@ -72,8 +72,11 @@ export async function riskTagRoutes(fastify: FastifyInstance): Promise<void> {
         data: {
           studentId: id,
           actorId: user.sub,
+          actorName: user.name,
           actionType: 'tag_add',
-          detail: { tagCode, tagName: riskTag.label } as any,
+          targetType: 'student_risk_tag',
+          targetId: String(studentTag.id),
+          detail: { tagCode, tagName: riskTag.label, reason } as any,
         },
       });
 
@@ -108,7 +111,10 @@ export async function riskTagRoutes(fastify: FastifyInstance): Promise<void> {
         data: {
           studentId: id,
           actorId: user.sub,
+          actorName: user.name,
           actionType: 'tag_remove',
+          targetType: 'student_risk_tag',
+          targetId: String(studentTag.id),
           detail: { tagCode, tagName: riskTag.label, removeReason } as any,
         },
       });

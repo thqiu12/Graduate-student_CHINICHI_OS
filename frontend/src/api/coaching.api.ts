@@ -3,6 +3,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from './client';
+import { planQueryKeys } from './plans.api';
 
 export interface CoachingRecord {
   id: string;
@@ -45,8 +46,8 @@ export function useAddCoachingRecord(studentId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['coaching', studentId] });
-      qc.invalidateQueries({ queryKey: ['student-plans', studentId] });
-      qc.invalidateQueries({ queryKey: ['student-tasks', studentId] });
+      qc.invalidateQueries({ queryKey: planQueryKeys.all(studentId) });
+      qc.invalidateQueries({ queryKey: planQueryKeys.logs(studentId) });
     },
   });
 }

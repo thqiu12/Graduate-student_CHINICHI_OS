@@ -136,8 +136,16 @@ export async function coachingRoutes(fastify: FastifyInstance): Promise<void> {
         data: {
           studentId: id,
           actorId: user.sub,
+          actorName: user.name,
           actionType: 'coaching_add',
-          detail: { recordId: record.id, date: body.date, form: body.form } as any,
+          targetType: 'coaching_record',
+          targetId: record.id,
+          detail: {
+            recordId: record.id,
+            date: body.date,
+            form: body.form,
+            todoCount: record.todos.length,
+          } as any,
         },
       });
 
