@@ -177,7 +177,10 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         data: {
           studentId: id,
           actorId: user.sub,
+          actorName: user.name,
           actionType: 'file_upload',
+          targetType: 'file',
+          targetId: file.id,
           detail: { fileId: file.id, fileType, displayName, versionNo } as any,
         },
       });

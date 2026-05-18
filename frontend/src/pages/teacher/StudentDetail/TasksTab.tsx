@@ -162,6 +162,7 @@ const TasksTab: React.FC<{ studentId: string }> = ({ studentId }) => {
 
       // 刷新规划数据
       queryClient.invalidateQueries({ queryKey: planQueryKeys.all(studentId) });
+      queryClient.invalidateQueries({ queryKey: planQueryKeys.logs(studentId) });
       setModalOpen(false);
     } catch (err) {
       const errMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -177,6 +178,7 @@ const TasksTab: React.FC<{ studentId: string }> = ({ studentId }) => {
     try {
       await deleteTask(studentId, taskId);
       queryClient.invalidateQueries({ queryKey: planQueryKeys.all(studentId) });
+      queryClient.invalidateQueries({ queryKey: planQueryKeys.logs(studentId) });
       messageApi.success('任务已删除');
     } catch (err) {
       messageApi.error(getErrorMessage(err, '删除失败，请重试'));

@@ -963,6 +963,22 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
+      await writeOperationLog(fastify, {
+        studentId,
+        actorId: user.sub,
+        actorName: user.name,
+        actionType: 'task_create',
+        targetType: 'period_plan_task',
+        targetId: task.id,
+        detail: {
+          planId,
+          planStatus: plan.status,
+          taskTitle: task.title,
+          dueDate: body.dueDate ?? null,
+          priority: task.priority,
+        } as unknown as Prisma.InputJsonValue,
+      });
+
       return reply.status(201).send({ data: task, message: '任务创建成功' });
     },
   );
@@ -1036,6 +1052,21 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           ...(body.repeatType !== undefined && { repeatType: body.repeatType }),
           ...(body.sortOrder !== undefined && { sortOrder: body.sortOrder }),
         },
+      });
+
+      await writeOperationLog(fastify, {
+        studentId,
+        actorId: user.sub,
+        actorName: user.name,
+        actionType: 'task_update',
+        targetType: 'period_plan_task',
+        targetId: taskId,
+        detail: {
+          planId: task.planId,
+          planStatus: task.plan.status,
+          taskTitle: task.title,
+          changes: body,
+        } as unknown as Prisma.InputJsonValue,
       });
 
       return reply.send({ data: updated, message: '任务更新成功' });
@@ -1251,7 +1282,24 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      await fastify.prisma.periodPlanTask.delete({ where: { id: taskId } });
+      await fastify.prisma.$transaction(async (tx) => {
+        await tx.periodPlanTask.delete({ where: { id: taskId } });
+        await tx.operationLog.create({
+          data: {
+            studentId,
+            actorId: user.sub,
+            actorName: user.name,
+            actionType: 'task_delete',
+            targetType: 'period_plan_task',
+            targetId: taskId,
+            detail: {
+              planId: task.planId,
+              planStatus: task.plan.status,
+              taskTitle: task.title,
+            } as any,
+          },
+        });
+      });
 
       return reply.send({ message: '任务已删除' });
     },

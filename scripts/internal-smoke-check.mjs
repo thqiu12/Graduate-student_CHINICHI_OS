@@ -34,6 +34,7 @@ assertContains('frontend/src/pages/admin/UserManagement.tsx', '导入学生CSV')
 assertContains('backend/src/routes/students.ts', '/students/import');
 assertContains('backend/src/routes/files.ts', '/students/:id/files/:fileId/versions/:versionId/download');
 assertContains('backend/src/routes/files.ts', '/students/:id/files/:fileId');
+assertContains('backend/src/routes/files.ts', "actionType: 'file_upload'");
 assertContains('frontend/src/pages/student/Files.tsx', 'FILE_TYPE_OPTIONS');
 assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', 'teacher-student-files');
 assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', '已上传文件');
@@ -43,6 +44,9 @@ assertContains('backend/src/utils/notifications.ts', 'notificationDelivery.creat
 assertContains('backend/src/routes/notifications.ts', 'createInAppNotification');
 assertContains('backend/src/routes/plans.ts', 'task_done');
 assertContains('backend/src/routes/plans.ts', 'task_reopen');
+assertContains('backend/src/routes/plans.ts', 'task_create');
+assertContains('backend/src/routes/plans.ts', 'task_update');
+assertContains('backend/src/routes/plans.ts', 'task_delete');
 assertContains('frontend/src/api/plans.api.ts', 'planQueryKeys.logs(studentId)');
 assertContains('backend/src/routes/coaching.ts', "targetType: 'coaching_record'");
 assertContains('backend/src/routes/risk-tags.ts', "targetType: 'student_risk_tag'");
