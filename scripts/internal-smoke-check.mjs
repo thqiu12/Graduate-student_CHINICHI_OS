@@ -34,6 +34,8 @@ assertContains('frontend/src/api/notifications.api.ts', 'plan_unconfirmed_teache
 assertContains('frontend/src/api/notifications.api.ts', 'weekly_summary_dept');
 assertContains('frontend/src/pages/admin/UserManagement.tsx', '导入学生CSV');
 assertContains('backend/src/routes/students.ts', '/students/import');
+assertContains('backend/src/routes/users.ts', 'user_enable');
+assertContains('backend/src/routes/users.ts', 'user_disable');
 assertContains('backend/src/routes/files.ts', '/students/:id/files/:fileId/versions/:versionId/download');
 assertContains('backend/src/routes/files.ts', '/students/:id/files/:fileId');
 assertContains('backend/src/routes/files.ts', "actionType: 'file_upload'");

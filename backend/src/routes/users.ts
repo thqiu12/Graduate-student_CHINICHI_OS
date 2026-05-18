@@ -458,6 +458,14 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         throw new AppError(ErrorCode.FORBIDDEN, '不能禁用自己的账号');
       }
 
+      const existingUser = await fastify.prisma.user.findUnique({
+        where: { id },
+        select: { id: true, name: true, isActive: true },
+      });
+      if (!existingUser) {
+        throw createError.notFound('用户', id);
+      }
+
       const updatedUser = await fastify.prisma.user.update({
         where: { id },
         data: { isActive: body.isActive },
@@ -477,6 +485,21 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
               subject: true,
             },
           },
+        },
+      });
+
+      await fastify.prisma.operationLog.create({
+        data: {
+          actorId: currentUser.sub,
+          actorName: currentUser.name,
+          actionType: body.isActive ? 'user_enable' : 'user_disable',
+          targetType: 'user',
+          targetId: id,
+          detail: {
+            userName: existingUser.name,
+            previousStatus: existingUser.isActive ? 'active' : 'disabled',
+            nextStatus: body.isActive ? 'active' : 'disabled',
+          } as any,
         },
       });
 
@@ -512,10 +535,26 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         throw createError.notFound('用户', id);
       }
 
-      // 软删除：设置 isActive = false
-      await fastify.prisma.user.update({
-        where: { id },
-        data: { isActive: false },
+      await fastify.prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id },
+          data: { isActive: false },
+        });
+
+        await tx.operationLog.create({
+          data: {
+            actorId: currentUser.sub,
+            actorName: currentUser.name,
+            actionType: 'user_disable',
+            targetType: 'user',
+            targetId: id,
+            detail: {
+              userName: existingUser.name,
+              previousStatus: existingUser.isActive ? 'active' : 'disabled',
+              nextStatus: 'disabled',
+            } as any,
+          },
+        });
       });
 
       return reply.send({ message: `用户 ${existingUser.name} 已禁用` });
