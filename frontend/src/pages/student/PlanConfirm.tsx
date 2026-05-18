@@ -48,11 +48,18 @@ interface DiffField {
   newValue: string | null;
 }
 
+interface TaskDiff {
+  type: 'added' | 'removed' | 'updated';
+  title: string;
+  changes?: DiffField[];
+}
+
 interface PlanDiffResponse {
   data: {
     current: PeriodPlan;
     previous: PeriodPlan | null;
     diffs: DiffField[];
+    taskDiffs?: TaskDiff[];
     changeReason: string | null;
   };
 }
@@ -141,7 +148,7 @@ const DiffPanel: React.FC<{ planId: string | undefined }> = ({ planId }) => {
 
   if (!diffData?.data) return null;
 
-  const { current, previous, diffs, changeReason } = diffData.data;
+  const { current, previous, diffs, taskDiffs = [], changeReason } = diffData.data;
 
   if (!previous) {
     return (
@@ -190,6 +197,7 @@ const DiffPanel: React.FC<{ planId: string | undefined }> = ({ planId }) => {
           <DiffOutlined />
           <span>新旧版本对比</span>
           {diffs.length > 0 && <Tag color="red">{diffs.length} 处变更</Tag>}
+          {taskDiffs.length > 0 && <Tag color="orange">{taskDiffs.length} 项任务变更</Tag>}
         </Space>
       }
       size="small"
@@ -224,7 +232,34 @@ const DiffPanel: React.FC<{ planId: string | undefined }> = ({ planId }) => {
         </div>
       )}
 
-      {diffs.length === 0 && (
+      {taskDiffs.length > 0 && (
+        <div style={{ padding: '10px 12px', borderTop: '1px solid #f0f0f0' }}>
+          <Text strong>任务变更：</Text>
+          <List
+            size="small"
+            dataSource={taskDiffs}
+            renderItem={(item) => (
+              <List.Item style={{ paddingLeft: 0, paddingRight: 0 }}>
+                <Space direction="vertical" size={2}>
+                  <Space>
+                    <Tag color={item.type === 'added' ? 'green' : item.type === 'removed' ? 'red' : 'orange'}>
+                      {item.type === 'added' ? '新增' : item.type === 'removed' ? '删除' : '修改'}
+                    </Tag>
+                    <Text>{item.title}</Text>
+                  </Space>
+                  {item.changes?.map((change) => (
+                    <Text key={change.field} type="secondary" style={{ fontSize: 12 }}>
+                      {change.label}：{change.oldValue ?? '（空）'} → {change.newValue ?? '（空）'}
+                    </Text>
+                  ))}
+                </Space>
+              </List.Item>
+            )}
+          />
+        </div>
+      )}
+
+      {diffs.length === 0 && taskDiffs.length === 0 && (
         <div style={{ padding: '12px', color: '#888', textAlign: 'center', borderTop: '1px solid #f0f0f0' }}>
           阶段基本信息无变化，可能仅调整了任务列表
         </div>

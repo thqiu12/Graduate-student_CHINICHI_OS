@@ -76,6 +76,16 @@ async function main(): Promise<void> {
       create: role,
     });
   }
+  const roles = await prisma.role.findMany({
+    where: { code: { in: ['admin_total', 'teacher', 'student'] } },
+  });
+  const roleIdByCode = new Map(roles.map((role) => [role.code, role.id]));
+  const adminRoleId = roleIdByCode.get('admin_total');
+  const teacherRoleId = roleIdByCode.get('teacher');
+  const studentRoleId = roleIdByCode.get('student');
+  if (!adminRoleId || !teacherRoleId || !studentRoleId) {
+    throw new Error('核心角色初始化失败');
+  }
   console.log('角色创建完成，共', roleData.length, '个角色');
 
   // ═══════════════════════════════════════
@@ -120,13 +130,13 @@ async function main(): Promise<void> {
     where: {
       userId_roleId: {
         userId: firstAdmin.id,
-        roleId: 1, // admin_total
+        roleId: adminRoleId,
       },
     },
     update: {},
     create: {
       userId: firstAdmin.id,
-      roleId: 1,
+      roleId: adminRoleId,
     },
   });
 
@@ -153,13 +163,13 @@ async function main(): Promise<void> {
     where: {
       userId_roleId: {
         userId: adminUser.id,
-        roleId: 1, // admin_total
+        roleId: adminRoleId,
       },
     },
     update: {},
     create: {
       userId: adminUser.id,
-      roleId: 1,
+      roleId: adminRoleId,
     },
   });
 
@@ -180,13 +190,13 @@ async function main(): Promise<void> {
     where: {
       userId_roleId: {
         userId: teacherUser.id,
-        roleId: 3, // teacher
+        roleId: teacherRoleId,
       },
     },
     update: {},
     create: {
       userId: teacherUser.id,
-      roleId: 3,
+      roleId: teacherRoleId,
       campusId: 1, // 东京校
     },
   });
@@ -208,13 +218,13 @@ async function main(): Promise<void> {
     where: {
       userId_roleId: {
         userId: studentUser.id,
-        roleId: 4, // student
+        roleId: studentRoleId,
       },
     },
     update: {},
     create: {
       userId: studentUser.id,
-      roleId: 4,
+      roleId: studentRoleId,
     },
   });
 

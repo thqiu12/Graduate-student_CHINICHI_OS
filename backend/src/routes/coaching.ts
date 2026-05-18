@@ -8,6 +8,7 @@ import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
 import { assertStudentAccess } from '../utils/access-control';
+import { PlanStatus } from '@prisma/client';
 
 const createCoachingSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式应为 YYYY-MM-DD'),
@@ -81,23 +82,54 @@ export async function coachingRoutes(fastify: FastifyInstance): Promise<void> {
       const student = await fastify.prisma.student.findUnique({ where: { id } });
       if (!student) throw new AppError(ErrorCode.NOT_FOUND, '学生不存在', 404);
 
-      const record = await fastify.prisma.coachingRecord.create({
-        data: {
-          studentId: id,
-          teacherId: user.sub,
-          coachedAt: new Date(body.date),
-          content: body.nextAction ? `${body.summary}\n\n下次行动：${body.nextAction}` : body.summary,
-          form: body.form,
-          nextDate: body.nextDate ? new Date(body.nextDate) : undefined,
-          schoolIds: [],
-          todos: body.todos ? {
-            create: body.todos.map(t => ({
-              title: t.title,
-              dueDate: t.dueDate ? new Date(t.dueDate) : null,
-            })),
-          } : undefined,
-        },
-        include: { todos: true },
+      const record = await fastify.prisma.$transaction(async (tx) => {
+        const activePlan = await tx.periodPlan.findFirst({
+          where: { studentId: id, status: PlanStatus.active },
+          orderBy: { startDate: 'desc' },
+          include: { tasks: { orderBy: { sortOrder: 'desc' }, take: 1 } },
+        });
+
+        const createdRecord = await tx.coachingRecord.create({
+          data: {
+            studentId: id,
+            teacherId: user.sub,
+            coachedAt: new Date(body.date),
+            content: body.nextAction ? `${body.summary}\n\n下次行动：${body.nextAction}` : body.summary,
+            form: body.form,
+            nextDate: body.nextDate ? new Date(body.nextDate) : undefined,
+            schoolIds: [],
+          },
+        });
+
+        for (const [idx, todo] of (body.todos ?? []).entries()) {
+          const task = activePlan
+            ? await tx.periodPlanTask.create({
+                data: {
+                  planId: activePlan.id,
+                  title: todo.title,
+                  dueDate: todo.dueDate ? new Date(todo.dueDate) : null,
+                  priority: '中',
+                  repeatType: 'once',
+                  sortOrder: (activePlan.tasks[0]?.sortOrder ?? 0) + idx + 1,
+                  status: 'pending',
+                },
+              })
+            : null;
+
+          await tx.coachingTodo.create({
+            data: {
+              coachingId: createdRecord.id,
+              taskId: task?.id,
+              title: todo.title,
+              dueDate: todo.dueDate ? new Date(todo.dueDate) : null,
+            },
+          });
+        }
+
+        return tx.coachingRecord.findUniqueOrThrow({
+          where: { id: createdRecord.id },
+          include: { todos: true },
+        });
       });
 
       await fastify.prisma.operationLog.create({

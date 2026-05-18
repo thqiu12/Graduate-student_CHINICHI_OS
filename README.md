@@ -182,7 +182,8 @@ Graduate-student_CHINICHI_OS/
 | `JWT_REFRESH_EXPIRES_IN` | Refresh Token 有效期 | `30d` |
 | `PORT` | 服务监听端口 | `3000` |
 | `NODE_ENV` | 环境标识 | `development` / `production` |
-| `OSS_*` | 阿里云 OSS 配置（文件存储） | 见 `.env.example` |
+| `UPLOAD_DIR` | 本地上传目录（开发/单机部署） | `./uploads` |
+| `OSS_*` | 阿里云 OSS 配置（生产文件存储建议项） | 见 `.env.example` |
 | `WECHAT_APP_ID` | 微信开放平台 AppID | - |
 | `DINGTALK_WEBHOOK_URL` | 钉钉机器人 Webhook | - |
 
@@ -220,7 +221,18 @@ POST  /api/students         # 新建学生档案
 GET   /api/students/:id     # 学生详情
 PATCH /api/students/:id     # 更新学生信息
 POST  /api/students/:id/teacher  # 变更班主任
-POST  /api/students/import  # Excel 批量导入（待实现）
+GET   /api/students/export  # 导出学生 CSV
+POST  /api/students/import  # CSV 批量导入学生
+```
+
+CSV 导入支持以下表头：`name/姓名`、`phone/手机号`、`campusId/校区ID`、`subjectId/学科ID`、`teacherId/班主任ID`、`entryDate/入学日期`、`targetYear/目标年份`、`targetSeason/目标考季`、`jlptLevel/JLPT等级`、`jlptScore/JLPT分数`、`undergradMajor/本科专业`、`undergradGpa/本科GPA`、`notes/备注`。
+
+### 文件接口
+
+```
+GET  /api/students/:id/files
+POST /api/students/:id/files
+GET  /api/students/:id/files/:fileId/versions/:versionId/download
 ```
 
 ### 通知接口

@@ -8,11 +8,11 @@ import {
   List, Divider,
 } from 'antd';
 import {
-  UploadOutlined, FileTextOutlined, FilePdfOutlined, FileOutlined,
+  DownloadOutlined, UploadOutlined, FileTextOutlined, FilePdfOutlined, FileOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/auth.store';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import apiClient from '../../api/client';
+import apiClient, { tokenStorage } from '../../api/client';
 import type { UploadFile } from 'antd';
 
 // UploadChangeInfo 结构
@@ -27,7 +27,6 @@ const { Title, Text } = Typography;
 interface FileVersion {
   id: string;
   versionNo: number;
-  ossKey: string;
   size: number;
   createdAt: string;
 }
@@ -90,7 +89,26 @@ const FilesPage: React.FC = () => {
     }
   };
 
-  const token = localStorage.getItem('chinichi_access_token') ?? '';
+  const handleDownload = async (file: StudentFile, version: FileVersion) => {
+    try {
+      const res = await apiClient.get(
+        `/students/${studentId}/files/${file.id}/versions/${version.id}/download`,
+        { responseType: 'blob' },
+      );
+      const url = URL.createObjectURL(res.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = file.fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      messageApi.error('下载失败，请稍后重试');
+    }
+  };
+
+  const token = tokenStorage.getToken() ?? '';
 
   if (isLoading) {
     return (
@@ -189,6 +207,15 @@ const FilesPage: React.FC = () => {
                                 )}
                               </Space>
                             </div>
+                            {latestVer && (
+                              <Button
+                                icon={<DownloadOutlined />}
+                                size="small"
+                                onClick={() => handleDownload(file, latestVer)}
+                              >
+                                下载
+                              </Button>
+                            )}
                           </div>
                         </List.Item>
                       );

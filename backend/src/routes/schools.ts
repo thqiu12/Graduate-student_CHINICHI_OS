@@ -23,6 +23,15 @@ const createSchoolSchema = z.object({
   result: z.enum(['passed', 'failed', 'waitlisted', 'withdrawn']).optional(),
 });
 
+const DEFAULT_PROGRESS_NODES = [
+  { nodeCode: 'professor_contact', nodeName: '教授联系', sortOrder: 1 },
+  { nodeCode: 'inno', nodeName: '内诺确认', sortOrder: 2 },
+  { nodeCode: 'documents', nodeName: '材料准备', sortOrder: 3 },
+  { nodeCode: 'application', nodeName: '出愿提交', sortOrder: 4 },
+  { nodeCode: 'exam', nodeName: '考试完成', sortOrder: 5 },
+  { nodeCode: 'result', nodeName: '结果确认', sortOrder: 6 },
+];
+
 export async function schoolRoutes(fastify: FastifyInstance): Promise<void> {
   // GET /api/students/:id/target-schools
   fastify.get(
@@ -34,7 +43,7 @@ export async function schoolRoutes(fastify: FastifyInstance): Promise<void> {
       const schools = await fastify.prisma.targetSchool.findMany({
         where: { studentId: id },
         orderBy: [{ rank: 'asc' }, { createdAt: 'asc' }],
-        include: { innoTracking: true },
+        include: { innoTracking: true, progressNodes: { orderBy: { sortOrder: 'asc' } } },
       });
       return reply.send({ data: schools });
     }
@@ -74,7 +83,11 @@ export async function schoolRoutes(fastify: FastifyInstance): Promise<void> {
           examDate: body.examDate ? new Date(body.examDate) : undefined,
           resultDate: body.resultDate ? new Date(body.resultDate) : undefined,
           result: body.result,
+          progressNodes: {
+            create: DEFAULT_PROGRESS_NODES,
+          },
         },
+        include: { progressNodes: { orderBy: { sortOrder: 'asc' } } },
       });
 
       await fastify.prisma.operationLog.create({
@@ -88,6 +101,53 @@ export async function schoolRoutes(fastify: FastifyInstance): Promise<void> {
 
       return reply.status(201).send(school);
     }
+  );
+
+  // PATCH /api/students/:id/target-schools/:sid/nodes/:nodeId
+  fastify.patch(
+    '/students/:id/target-schools/:sid/nodes/:nodeId',
+    { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER])] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { id, sid, nodeId } = request.params as { id: string; sid: string; nodeId: string };
+      const body = z.object({ isDone: z.boolean() }).parse(request.body);
+      await assertStudentAccess(fastify, user, id);
+
+      const school = await fastify.prisma.targetSchool.findFirst({
+        where: { id: sid, studentId: id },
+      });
+      if (!school) throw new AppError(ErrorCode.NOT_FOUND, '志望校不存在', 404);
+
+      const node = await fastify.prisma.schoolProgressNode.findFirst({
+        where: { id: Number(nodeId), schoolId: sid },
+      });
+      if (!node) throw new AppError(ErrorCode.NOT_FOUND, '进度节点不存在', 404);
+
+      const updated = await fastify.prisma.schoolProgressNode.update({
+        where: { id: node.id },
+        data: {
+          isDone: body.isDone,
+          doneAt: body.isDone ? new Date() : null,
+          doneBy: body.isDone ? user.sub : null,
+        },
+      });
+
+      await fastify.prisma.operationLog.create({
+        data: {
+          studentId: id,
+          actorId: user.sub,
+          actionType: 'school_node_update',
+          detail: {
+            schoolId: sid,
+            nodeId: node.id,
+            nodeName: node.nodeName,
+            isDone: body.isDone,
+          } as any,
+        },
+      });
+
+      return reply.send({ data: updated, message: '志望校进度已更新' });
+    },
   );
 
   // DELETE /api/students/:id/target-schools/:sid

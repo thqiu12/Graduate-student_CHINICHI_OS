@@ -42,9 +42,79 @@ const listQuerySchema = z.object({
 
 type CreateStudentBody = z.infer<typeof createStudentSchema>;
 type UpdateStudentBody = z.infer<typeof updateStudentSchema>;
+type ImportStudentRow = CreateStudentBody & { rowNumber: number };
 
 interface StudentParams {
   id: string;
+}
+
+function csvEscape(value: unknown): string {
+  const text = value === null || value === undefined ? '' : String(value);
+  const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${safeText.replace(/"/g, '""')}"`;
+}
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+
+    if (char === '"' && inQuotes && next === '"') {
+      cell += '"';
+      i += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      row.push(cell.trim());
+      cell = '';
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && next === '\n') i += 1;
+      row.push(cell.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += char;
+    }
+  }
+
+  row.push(cell.trim());
+  if (row.some(Boolean)) rows.push(row);
+  return rows;
+}
+
+function mapImportRows(csvText: string): ImportStudentRow[] {
+  const rows = parseCsv(csvText);
+  const [header, ...bodyRows] = rows;
+  if (!header) return [];
+
+  const headerMap = new Map(header.map((name, index) => [name, index]));
+  const pick = (row: string[], keys: string[]) => {
+    const index = keys.map((key) => headerMap.get(key)).find((idx) => idx !== undefined);
+    return index === undefined ? undefined : row[index];
+  };
+
+  return bodyRows.map((row, idx) => ({
+    rowNumber: idx + 2,
+    name: pick(row, ['name', '姓名']) ?? '',
+    phone: pick(row, ['phone', '手机号']) ?? '',
+    campusId: Number(pick(row, ['campusId', '校区ID'])),
+    subjectId: Number(pick(row, ['subjectId', '学科ID'])),
+    teacherId: pick(row, ['teacherId', '班主任ID']),
+    entryDate: pick(row, ['entryDate', '入学日期']) ?? '',
+    targetYear: pick(row, ['targetYear', '目标年份']),
+    targetSeason: pick(row, ['targetSeason', '目标考季']),
+    jlptLevel: pick(row, ['jlptLevel', 'JLPT等级']),
+    jlptScore: pick(row, ['jlptScore', 'JLPT分数']) ? Number(pick(row, ['jlptScore', 'JLPT分数'])) : undefined,
+    undergradMajor: pick(row, ['undergradMajor', '本科专业']),
+    undergradGpa: pick(row, ['undergradGpa', '本科GPA']) ? Number(pick(row, ['undergradGpa', '本科GPA'])) : undefined,
+    notes: pick(row, ['notes', '备注']),
+  }));
 }
 
 // ─── 路由注册函数 ─────────────────────────────────────────
@@ -132,6 +202,87 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
         data: students,
         pagination: { total, page, pageSize, totalPages: Math.ceil(total / pageSize) },
       });
+    },
+  );
+
+  // GET /api/students/export - 导出学生 CSV
+  fastify.get(
+    '/students/export',
+    {
+      preHandler: [
+        authenticate,
+        authorize([
+          Roles.ADMIN_TOTAL,
+          Roles.SUBJECT_HEAD,
+          Roles.TEACHER,
+        ]),
+      ],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const whereClause = await buildStudentScopeWhere(fastify, user);
+
+      const students = await fastify.prisma.student.findMany({
+        where: whereClause,
+        include: {
+          user: { select: { name: true, phone: true, email: true } },
+          campus: true,
+          subject: true,
+          teachers: {
+            where: { endedAt: null },
+            include: { teacher: { select: { name: true } } },
+            take: 1,
+          },
+          riskTags: {
+            where: { removedAt: null },
+            include: { tag: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const header = [
+        '学生ID',
+        '姓名',
+        '手机号',
+        '邮箱',
+        '校区',
+        '学科',
+        '班主任',
+        '入学日期',
+        '目标年份',
+        '目标考季',
+        'JLPT等级',
+        'JLPT分数',
+        '本科专业',
+        '本科GPA',
+        '风险标签',
+        '备注',
+      ];
+      const rows = students.map((student) => [
+        student.id,
+        student.user.name,
+        student.user.phone,
+        student.user.email,
+        student.campus?.name,
+        student.subject?.name,
+        student.teachers[0]?.teacher.name,
+        student.entryDate?.toISOString().slice(0, 10),
+        student.targetYear,
+        student.targetSeason,
+        student.jlptLevel,
+        student.jlptScore,
+        student.undergradMajor,
+        student.undergradGpa,
+        student.riskTags.map((risk) => risk.tag.label).join(';'),
+        student.notes,
+      ]);
+
+      const csv = [header, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n');
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="students-${new Date().toISOString().slice(0, 10)}.csv"`)
+        .send(`\uFEFF${csv}`);
     },
   );
 
@@ -406,7 +557,7 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
-  // POST /api/students/import - Excel 批量导入（骨架）
+  // POST /api/students/import - CSV 批量导入
   fastify.post(
     '/students/import',
     {
@@ -415,15 +566,148 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
         authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD]),
       ],
     },
-    async (_request: FastifyRequest, reply: FastifyReply) => {
-      // TODO: 实现 Excel 解析逻辑（使用 xlsx 库）
-      // 1. 解析上传的 .xlsx 文件
-      // 2. 验证每行数据格式
-      // 3. 预览并返回异常行
-      // 4. 确认后批量创建学生档案
-      return reply.status(501).send({
-        code: 'NOT_IMPLEMENTED',
-        message: 'Excel 批量导入功能待实现（Phase 4）',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const parts = request.parts();
+      let csvText = '';
+
+      for await (const part of parts) {
+        if (part.type === 'file') {
+          const buffer = await part.toBuffer();
+          csvText = buffer.toString('utf8').replace(/^\uFEFF/, '');
+          break;
+        }
+      }
+
+      if (!csvText) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, '请上传 CSV 文件');
+      }
+
+      const rows = mapImportRows(csvText);
+      if (rows.length === 0) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, 'CSV 中没有可导入的数据');
+      }
+
+      const errors: Array<{ rowNumber: number; message: string }> = [];
+      const validRows: Array<CreateStudentBody & { rowNumber: number; teacherId: string }> = [];
+      for (const row of rows) {
+        const parsed = createStudentSchema.safeParse(row);
+        if (!parsed.success) {
+          errors.push({ rowNumber: row.rowNumber, message: parsed.error.errors[0]?.message ?? '数据格式错误' });
+        } else if (!parsed.data.teacherId) {
+          errors.push({ rowNumber: row.rowNumber, message: '批量导入必须提供班主任ID' });
+        } else {
+          validRows.push({ ...parsed.data, rowNumber: row.rowNumber, teacherId: parsed.data.teacherId });
+        }
+      }
+
+      const phones = validRows.map((row) => row.phone);
+      const teacherIds = [...new Set(validRows.map((row) => row.teacherId))];
+      const existingUsers = phones.length
+        ? await fastify.prisma.user.findMany({
+            where: { phone: { in: phones } },
+            select: { phone: true },
+          })
+        : [];
+      const teachers = teacherIds.length
+        ? await fastify.prisma.user.findMany({
+            where: {
+              id: { in: teacherIds },
+              isActive: true,
+              userRoles: { some: { role: { code: Roles.TEACHER } } },
+            },
+            select: { id: true },
+          })
+        : [];
+      const existingPhones = new Set(existingUsers.map((u) => u.phone));
+      const validTeacherIds = new Set(teachers.map((teacher) => teacher.id));
+      const duplicatePhones = new Set(phones.filter((phone, idx) => phones.indexOf(phone) !== idx));
+
+      validRows.forEach((row) => {
+        if (existingPhones.has(row.phone)) {
+          errors.push({ rowNumber: row.rowNumber, message: `手机号 ${row.phone} 已存在` });
+        }
+        if (duplicatePhones.has(row.phone)) {
+          errors.push({ rowNumber: row.rowNumber, message: `手机号 ${row.phone} 在导入文件中重复` });
+        }
+        if (!validTeacherIds.has(row.teacherId)) {
+          errors.push({ rowNumber: row.rowNumber, message: `班主任ID ${row.teacherId} 不存在或不是有效班主任账号` });
+        }
+      });
+
+      if (errors.length > 0) {
+        return reply.status(400).send({
+          code: 'IMPORT_VALIDATION_ERROR',
+          message: '导入数据存在错误，请修正后重试',
+          errors,
+        });
+      }
+
+      const result = await fastify.prisma.$transaction(async (tx) => {
+        const studentRole = await tx.role.findUnique({ where: { code: Roles.STUDENT } });
+        if (!studentRole) {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, '学生角色未初始化');
+        }
+
+        const created = [];
+        for (const row of validRows) {
+          const newUser = await tx.user.create({
+            data: {
+              name: row.name,
+              phone: row.phone,
+              isActive: true,
+            },
+          });
+
+          await tx.userRole.create({
+            data: {
+              userId: newUser.id,
+              roleId: studentRole.id,
+            },
+          });
+
+          const student = await tx.student.create({
+            data: {
+              userId: newUser.id,
+              campusId: row.campusId,
+              subjectId: row.subjectId,
+              entryDate: new Date(row.entryDate),
+              targetYear: row.targetYear,
+              targetSeason: row.targetSeason,
+              jlptLevel: row.jlptLevel,
+              jlptScore: row.jlptScore,
+              undergradMajor: row.undergradMajor,
+              undergradGpa: row.undergradGpa,
+              notes: row.notes,
+            },
+          });
+
+          await tx.studentTeacher.create({
+            data: {
+              studentId: student.id,
+              teacherId: row.teacherId,
+            },
+          });
+
+          created.push(student);
+        }
+
+        await tx.operationLog.create({
+          data: {
+            actorId: user.sub,
+            actorName: user.name,
+            actionType: 'students_import',
+            targetType: 'student',
+            detail: { count: created.length } as any,
+          },
+        });
+
+        return created;
+      });
+
+      return reply.status(201).send({
+        data: { imported: result.length },
+        message: `成功导入 ${result.length} 名学生`,
       });
     },
   );

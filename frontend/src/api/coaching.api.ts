@@ -43,6 +43,10 @@ export function useAddCoachingRecord(studentId: string) {
       const res = await apiClient.post(`/students/${studentId}/coaching-records`, body);
       return res.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['coaching', studentId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['coaching', studentId] });
+      qc.invalidateQueries({ queryKey: ['student-plans', studentId] });
+      qc.invalidateQueries({ queryKey: ['student-tasks', studentId] });
+    },
   });
 }

@@ -12,7 +12,7 @@ import path from 'path';
 import fs from 'fs';
 import { pipeline } from 'stream/promises';
 
-const UPLOAD_DIR = '/home/work/uploads';
+const UPLOAD_DIR = process.env['UPLOAD_DIR'] ?? path.resolve(process.cwd(), 'uploads');
 const FILE_TYPES = [
   'research_plan',
   'transcript',
@@ -53,7 +53,6 @@ function serializeFile(file: FileWithRelations) {
     versions: file.versions.map((version) => ({
       id: version.id,
       versionNo: version.versionNo,
-      ossKey: version.ossKey,
       size: version.fileSize ? Number(version.fileSize) : 0,
       mimeType: version.mimeType,
       createdAt: version.uploadedAt,
@@ -185,5 +184,40 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
 
       return reply.status(201).send({ data: serializeFile(file), message: '文件上传成功' });
     }
+  );
+
+  // GET /api/students/:id/files/:fileId/versions/:versionId/download
+  fastify.get(
+    '/students/:id/files/:fileId/versions/:versionId/download',
+    { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER, Roles.STUDENT])] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id, fileId, versionId } = request.params as {
+        id: string;
+        fileId: string;
+        versionId: string;
+      };
+      await assertStudentAccess(fastify, request.user as JwtPayload, id);
+
+      const file = await fastify.prisma.file.findFirst({
+        where: { id: fileId, studentId: id },
+        include: {
+          versions: { where: { id: versionId } },
+        },
+      });
+      const version = file?.versions[0];
+      if (!file || !version) {
+        throw new AppError(ErrorCode.NOT_FOUND, '文件不存在', 404);
+      }
+
+      if (!fs.existsSync(version.ossKey)) {
+        throw new AppError(ErrorCode.NOT_FOUND, '文件实体不存在，请联系管理员重新上传', 404);
+      }
+
+      return reply
+        .header('Content-Type', version.mimeType ?? 'application/octet-stream')
+        .header('Content-Length', version.fileSize?.toString() ?? undefined)
+        .header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.displayName)}`)
+        .send(fs.createReadStream(version.ossKey));
+    },
   );
 }

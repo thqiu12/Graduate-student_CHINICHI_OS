@@ -18,6 +18,13 @@ export interface TargetSchool {
   result?: string;
   createdAt: string;
   innoTracking?: { status: string; contactCount: number; confirmedAt?: string };
+  progressNodes?: Array<{
+    id: number;
+    nodeCode: string;
+    nodeName: string;
+    isDone: boolean;
+    doneAt?: string;
+  }>;
 }
 
 export function useTargetSchools(studentId: string) {
@@ -47,6 +54,17 @@ export function useDeleteSchool(studentId: string) {
   return useMutation({
     mutationFn: async (schoolId: string) => {
       await apiClient.delete(`/students/${studentId}/target-schools/${schoolId}`);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schools', studentId] }),
+  });
+}
+
+export function useUpdateSchoolNode(studentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ schoolId, nodeId, isDone }: { schoolId: string; nodeId: number; isDone: boolean }) => {
+      const res = await apiClient.patch(`/students/${studentId}/target-schools/${schoolId}/nodes/${nodeId}`, { isDone });
+      return res.data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['schools', studentId] }),
   });

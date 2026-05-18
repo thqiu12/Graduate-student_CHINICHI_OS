@@ -199,7 +199,6 @@ export interface FileVersion {
   id: string;
   fileId: string;
   versionNo: number;
-  ossKey: string;
   fileSize?: number | null;
   mimeType?: string | null;
   uploadedBy: string;

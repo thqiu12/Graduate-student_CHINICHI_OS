@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import {
   Tabs, Card, Descriptions, Tag, Button, Typography, Timeline,
   Form, Input, Select, DatePicker, Modal, Upload, message, Table,
-  Space, Popconfirm, Badge, Row, Col, Statistic, Divider, Empty, Spin,
+  Space, Popconfirm, Badge, Row, Col, Statistic, Divider, Empty, Spin, Checkbox,
 } from 'antd';
 import {
   PlusOutlined, UploadOutlined, DeleteOutlined, EyeOutlined,
@@ -15,7 +15,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { useStudent } from '../../../api/students.api';
 import { useCoachingRecords, useAddCoachingRecord } from '../../../api/coaching.api';
-import { useTargetSchools, useAddSchool, useDeleteSchool } from '../../../api/schools.api';
+import { useTargetSchools, useAddSchool, useDeleteSchool, useUpdateSchoolNode } from '../../../api/schools.api';
 import { usePushNotification } from '../../../api/notifications.api';
 import StagesTab from './StagesTab';
 import TasksTab from './TasksTab';
@@ -134,6 +134,7 @@ const SchoolsTab: React.FC<{ studentId: string }> = ({ studentId }) => {
   const { data, isLoading } = useTargetSchools(studentId);
   const addMutation = useAddSchool(studentId);
   const deleteMutation = useDeleteSchool(studentId);
+  const updateNodeMutation = useUpdateSchoolNode(studentId);
 
   const handleAdd = async (values: any) => {
     try {
@@ -156,6 +157,27 @@ const SchoolsTab: React.FC<{ studentId: string }> = ({ studentId }) => {
     {
       title: '考试类型', dataIndex: 'examTypes',
       render: (v: string[]) => v?.map(t => <Tag key={t}>{t}</Tag>),
+    },
+    {
+      title: '进度节点',
+      dataIndex: 'progressNodes',
+      render: (nodes: any[], record: any) => (
+        <Space size={[4, 4]} wrap>
+          {(nodes ?? []).map((node) => (
+            <Checkbox
+              key={node.id}
+              checked={node.isDone}
+              onChange={(event) => updateNodeMutation.mutate({
+                schoolId: record.id,
+                nodeId: node.id,
+                isDone: event.target.checked,
+              })}
+            >
+              {node.nodeName}
+            </Checkbox>
+          ))}
+        </Space>
+      ),
     },
     {
       title: '内诺状态', dataIndex: 'innoTracking',

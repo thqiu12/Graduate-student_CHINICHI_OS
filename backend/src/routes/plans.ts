@@ -51,6 +51,11 @@ type CreatePlanBody = z.infer<typeof createPlanSchema>;
 type RejectPlanBody = z.infer<typeof rejectPlanSchema>;
 type ChangePlanBody = z.infer<typeof changePlanSchema>;
 type PlanWithTasks = Prisma.PeriodPlanGetPayload<{ include: { tasks: true } }>;
+type TaskDiff = {
+  type: 'added' | 'removed' | 'updated';
+  title: string;
+  changes?: Array<{ field: string; label: string; oldValue: string | null; newValue: string | null }>;
+};
 
 interface StudentParams {
   studentId: string;
@@ -125,6 +130,49 @@ function taskCreateData(
     doneAt: next.doneAt ?? undefined,
     doneNote: next.doneNote ?? undefined,
   };
+}
+
+function comparePlanTasks(
+  previousTasks: PlanWithTasks['tasks'],
+  currentTasks: PlanWithTasks['tasks'],
+): TaskDiff[] {
+  const normalize = (title: string) => title.trim().toLowerCase();
+  const previousByTitle = new Map(previousTasks.map((task) => [normalize(task.title), task]));
+  const currentByTitle = new Map(currentTasks.map((task) => [normalize(task.title), task]));
+  const diffs: TaskDiff[] = [];
+
+  for (const task of currentTasks) {
+    const oldTask = previousByTitle.get(normalize(task.title));
+    if (!oldTask) {
+      diffs.push({ type: 'added', title: task.title });
+      continue;
+    }
+
+    const changes: TaskDiff['changes'] = [];
+    const compare = (field: string, label: string, oldVal: unknown, newVal: unknown) => {
+      const oldValue = oldVal !== null && oldVal !== undefined ? String(oldVal) : null;
+      const newValue = newVal !== null && newVal !== undefined ? String(newVal) : null;
+      if (oldValue !== newValue) changes.push({ field, label, oldValue, newValue });
+    };
+
+    compare('description', '说明', oldTask.description, task.description);
+    compare('dueDate', '截止日期', oldTask.dueDate?.toISOString().slice(0, 10), task.dueDate?.toISOString().slice(0, 10));
+    compare('priority', '优先级', oldTask.priority, task.priority);
+    compare('repeatType', '重复类型', oldTask.repeatType, task.repeatType);
+    compare('sortOrder', '排序', oldTask.sortOrder, task.sortOrder);
+
+    if (changes.length > 0) {
+      diffs.push({ type: 'updated', title: task.title, changes });
+    }
+  }
+
+  for (const task of previousTasks) {
+    if (!currentByTitle.has(normalize(task.title))) {
+      diffs.push({ type: 'removed', title: task.title });
+    }
+  }
+
+  return diffs;
 }
 
 async function createTaskChangePlan(
@@ -452,24 +500,37 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
 
       const now = new Date();
 
-      // 更新规划状态为已生效
-      const updatedPlan = await fastify.prisma.periodPlan.update({
-        where: { id: planId },
-        data: {
-          status: PlanStatus.active,
-          confirmedAt: now,
-          confirmedBy: user.sub,
-        },
-      });
+      const updatedPlan = await fastify.prisma.$transaction(async (tx) => {
+        if (plan.previousPlanId) {
+          await tx.periodPlan.updateMany({
+            where: {
+              id: plan.previousPlanId,
+              studentId,
+              status: PlanStatus.active,
+            },
+            data: { status: PlanStatus.cancelled },
+          });
+        }
 
-      // 记录确认记录
-      await fastify.prisma.planConfirmation.create({
-        data: {
-          planId,
-          action: 'confirm',
-          actorId: user.sub,
-          content: '学生确认接受规划',
-        },
+        const confirmedPlan = await tx.periodPlan.update({
+          where: { id: planId },
+          data: {
+            status: PlanStatus.active,
+            confirmedAt: now,
+            confirmedBy: user.sub,
+          },
+        });
+
+        await tx.planConfirmation.create({
+          data: {
+            planId,
+            action: 'confirm',
+            actorId: user.sub,
+            content: '学生确认接受规划',
+          },
+        });
+
+        return confirmedPlan;
       });
 
       // 写入操作日志
@@ -1000,6 +1061,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
 
       // 计算字段差异
       const diffs: Array<{ field: string; label: string; oldValue: string | null; newValue: string | null }> = [];
+      let taskDiffs: TaskDiff[] = [];
 
       if (previousPlan) {
         const compare = (field: string, label: string, oldVal: any, newVal: any) => {
@@ -1024,6 +1086,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           previousPlan.endDate?.toISOString().slice(0, 10),
           currentPlan.endDate?.toISOString().slice(0, 10),
         );
+        taskDiffs = comparePlanTasks(previousPlan.tasks, currentPlan.tasks);
       }
 
       return reply.send({
@@ -1031,6 +1094,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           current: currentPlan,
           previous: previousPlan,
           diffs,
+          taskDiffs,
           changeReason: currentPlan.changeReason,
         },
       });
@@ -1078,6 +1142,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const diffs: Array<{ field: string; label: string; oldValue: string | null; newValue: string | null }> = [];
+      let taskDiffs: TaskDiff[] = [];
       if (previousPlan) {
         const compare = (field: string, label: string, oldVal: unknown, newVal: unknown) => {
           const oldValue = oldVal !== null && oldVal !== undefined ? String(oldVal) : null;
@@ -1089,6 +1154,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         compare('startDate', '开始日期', previousPlan.startDate?.toISOString().slice(0, 10), plan.startDate?.toISOString().slice(0, 10));
         compare('endDate', '截止日期', previousPlan.endDate?.toISOString().slice(0, 10), plan.endDate?.toISOString().slice(0, 10));
         compare('taskCount', '任务数量', previousPlan.tasks.length, plan.tasks.length);
+        taskDiffs = comparePlanTasks(previousPlan.tasks, plan.tasks);
       }
 
       // 查询该规划的操作日志（最近两条 update 类型）
@@ -1116,6 +1182,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           current: plan,
           previous: previousPlan,
           diffs,
+          taskDiffs,
           hasChanges,
           changeReason: plan.changeReason ?? null,
           changedAt: latestUpdate?.createdAt ?? plan.createdAt,

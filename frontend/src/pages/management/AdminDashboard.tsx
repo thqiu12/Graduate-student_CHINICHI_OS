@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useStatsOverview, useExamSeasonStats, useAlerts } from '../../api/stats.api';
+import apiClient from '../../api/client';
 
 const { Title, Text } = Typography;
 
@@ -29,8 +30,20 @@ const AdminDashboard: React.FC = () => {
   const noPlan = alerts?.noPlan ?? [];
   const pendingTooLong = alerts?.pendingTooLong ?? [];
 
-  const handleExport = () => {
-    messageApi.info('数据导出功能开发中，敬请期待');
+  const handleExport = async () => {
+    try {
+      const res = await apiClient.get('/students/export', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `students-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      messageApi.error('导出失败，请稍后重试');
+    }
   };
 
   const planStatData = Object.entries(overview?.planStats ?? {}).map(([status, count]) => {
