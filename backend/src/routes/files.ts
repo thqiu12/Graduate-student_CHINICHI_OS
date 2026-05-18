@@ -7,6 +7,7 @@ import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
 import { assertStudentAccess } from '../utils/access-control';
+import { Prisma } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
 import { pipeline } from 'stream/promises';
@@ -34,6 +35,32 @@ const FILE_TYPE_NAMES: Record<string, string> = {
   other: '其他文件',
 };
 
+type FileWithRelations = Prisma.FileGetPayload<{
+  include: {
+    versions: true;
+    uploader: { select: { name: true } };
+  };
+}>;
+
+function serializeFile(file: FileWithRelations) {
+  return {
+    id: file.id,
+    fileName: file.displayName,
+    fileType: file.fileType,
+    description: file.versions[0]?.notes ?? undefined,
+    createdAt: file.createdAt,
+    uploader: file.uploader,
+    versions: file.versions.map((version) => ({
+      id: version.id,
+      versionNo: version.versionNo,
+      ossKey: version.ossKey,
+      size: version.fileSize ? Number(version.fileSize) : 0,
+      mimeType: version.mimeType,
+      createdAt: version.uploadedAt,
+    })),
+  };
+}
+
 // 确保上传目录存在
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -58,13 +85,13 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       // 按 fileType 分组
-      const grouped: Record<string, typeof files> = {};
+      const grouped: Record<string, ReturnType<typeof serializeFile>[]> = {};
       for (const ft of FILE_TYPES) {
         grouped[ft] = [];
       }
       for (const file of files) {
         const ft = FILE_TYPES.includes(file.fileType) ? file.fileType : 'other';
-        grouped[ft]!.push(file);
+        grouped[ft]!.push(serializeFile(file));
       }
 
       return reply.send({ data: grouped, typeNames: FILE_TYPE_NAMES });
@@ -89,6 +116,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       let savedPath = '';
       let originalName = '';
       let fileSize = 0;
+      let mimeType = '';
 
       for await (const part of parts) {
         if (part.type === 'field') {
@@ -103,6 +131,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
           const ext = path.extname(originalName);
           const safeName = `${id}_${Date.now()}${ext}`;
           savedPath = path.join(UPLOAD_DIR, safeName);
+          mimeType = part.mimetype;
           const writeStream = fs.createWriteStream(savedPath);
           await pipeline(part.file, writeStream);
           fileSize = fs.statSync(savedPath).size;
@@ -136,6 +165,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
               versionNo,
               ossKey: savedPath,
               fileSize: BigInt(fileSize),
+              mimeType,
               uploadedBy: user.sub,
               notes: description || undefined,
             },
@@ -153,7 +183,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
-      return reply.status(201).send(file);
+      return reply.status(201).send({ data: serializeFile(file), message: '文件上传成功' });
     }
   );
 }

@@ -50,6 +50,7 @@ const changePlanSchema = z.object({
 type CreatePlanBody = z.infer<typeof createPlanSchema>;
 type RejectPlanBody = z.infer<typeof rejectPlanSchema>;
 type ChangePlanBody = z.infer<typeof changePlanSchema>;
+type PlanWithTasks = Prisma.PeriodPlanGetPayload<{ include: { tasks: true } }>;
 
 interface StudentParams {
   studentId: string;
@@ -83,6 +84,114 @@ async function writeOperationLog(
       detail: (options.detail ?? {}) as any,
     },
   });
+}
+
+async function ensureNoPendingPlanChange(
+  fastify: FastifyInstance,
+  studentId: string,
+  sourcePlanId: string,
+): Promise<void> {
+  const pendingPlan = await fastify.prisma.periodPlan.findFirst({
+    where: {
+      studentId,
+      previousPlanId: sourcePlanId,
+      status: PlanStatus.change_pending,
+    },
+  });
+
+  if (pendingPlan) {
+    throw new AppError(
+      ErrorCode.PLAN_CANNOT_CONFIRM,
+      '该阶段已有待确认的规划变更，请先等待学生确认或处理后再继续修改',
+      409,
+    );
+  }
+}
+
+function taskCreateData(
+  task: PlanWithTasks['tasks'][number],
+  overrides: Partial<PlanWithTasks['tasks'][number]> = {},
+) {
+  const next = { ...task, ...overrides };
+  return {
+    title: next.title,
+    description: next.description ?? undefined,
+    dueDate: next.dueDate ?? undefined,
+    dueTime: next.dueTime ?? undefined,
+    priority: next.priority,
+    repeatType: next.repeatType,
+    sortOrder: next.sortOrder,
+    status: next.status,
+    doneAt: next.doneAt ?? undefined,
+    doneNote: next.doneNote ?? undefined,
+  };
+}
+
+async function createTaskChangePlan(
+  fastify: FastifyInstance,
+  options: {
+    studentId: string;
+    sourcePlan: PlanWithTasks;
+    user: JwtPayload;
+    changeReason: string;
+    tasks: ReturnType<typeof taskCreateData>[];
+    detail: Prisma.InputJsonValue;
+  },
+) {
+  const { studentId, sourcePlan, user, changeReason, tasks, detail } = options;
+  await ensureNoPendingPlanChange(fastify, studentId, sourcePlan.id);
+
+  const latestPlan = await fastify.prisma.periodPlan.findFirst({
+    where: { studentId, periodCode: sourcePlan.periodCode },
+    orderBy: { version: 'desc' },
+  });
+  const newVersion = (latestPlan?.version ?? sourcePlan.version) + 1;
+
+  const newPlan = await fastify.prisma.periodPlan.create({
+    data: {
+      studentId,
+      periodCode: sourcePlan.periodCode,
+      stageName: sourcePlan.stageName,
+      goal: sourcePlan.goal,
+      startDate: sourcePlan.startDate,
+      endDate: sourcePlan.endDate,
+      version: newVersion,
+      status: PlanStatus.change_pending,
+      changeReason,
+      previousPlanId: sourcePlan.id,
+      createdBy: user.sub,
+      tasks: { create: tasks },
+    },
+    include: { tasks: true },
+  });
+
+  const studentRecord = await fastify.prisma.student.findUnique({
+    where: { id: studentId },
+  });
+
+  if (studentRecord) {
+    await fastify.prisma.notification.create({
+      data: {
+        userId: studentRecord.userId,
+        type: 'plan_change_pending',
+        title: '规划任务已更新，需要重新确认',
+        content: `班主任对「${sourcePlan.stageName}」规划任务进行了调整，请查看变更内容并确认。`,
+        relatedId: newPlan.id,
+      },
+    });
+  }
+
+  await writeOperationLog(fastify, {
+    studentId,
+    actorId: user.sub,
+    actorName: user.name,
+    actionType: 'plan_task_change',
+    targetType: 'period_plan',
+    targetId: newPlan.id,
+    detail,
+  });
+
+  return newPlan;
 }
 
 // ─── 路由注册函数 ─────────────────────────────────────────
@@ -711,7 +820,8 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { studentId, planId } = request.params as { studentId: string; planId: string };
-      await assertStudentAccess(fastify, request.user as JwtPayload, studentId);
+      const user = request.user as JwtPayload;
+      await assertStudentAccess(fastify, user, studentId);
       const body = request.body as {
         title: string;
         description?: string;
@@ -727,6 +837,39 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         include: { tasks: { orderBy: { sortOrder: 'asc' } } },
       });
       if (!plan) throw createError.notFound('规划不存在');
+
+      if (plan.status === PlanStatus.active) {
+        const newTask = {
+          title: body.title,
+          description: body.description ?? undefined,
+          dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
+          dueTime: undefined,
+          priority: body.priority ?? '中',
+          repeatType: body.repeatType ?? 'once',
+          sortOrder: body.sortOrder ?? plan.tasks.length,
+          status: 'pending',
+          doneAt: undefined,
+          doneNote: undefined,
+        };
+        const newPlan = await createTaskChangePlan(fastify, {
+          studentId,
+          sourcePlan: plan,
+          user,
+          changeReason: `新增任务：${body.title}`,
+          tasks: [...plan.tasks.map((task) => taskCreateData(task)), newTask],
+          detail: {
+            previousPlanId: plan.id,
+            previousVersion: plan.version,
+            newTask: body.title,
+            changeReason: `新增任务：${body.title}`,
+          } as unknown as Prisma.InputJsonValue,
+        });
+
+        return reply.status(201).send({
+          data: newPlan,
+          message: '任务变更已发起，等待学生确认',
+        });
+      }
 
       const task = await fastify.prisma.periodPlanTask.create({
         data: {
@@ -753,7 +896,8 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { studentId, taskId } = request.params as { studentId: string; taskId: string };
-      await assertStudentAccess(fastify, request.user as JwtPayload, studentId);
+      const user = request.user as JwtPayload;
+      await assertStudentAccess(fastify, user, studentId);
       const body = request.body as {
         title?: string;
         description?: string;
@@ -766,8 +910,42 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       // 确认任务属于该学生的规划
       const task = await fastify.prisma.periodPlanTask.findFirst({
         where: { id: taskId, plan: { studentId } },
+        include: { plan: { include: { tasks: { orderBy: { sortOrder: 'asc' } } } } },
       });
       if (!task) throw createError.notFound('任务不存在');
+
+      if (task.plan.status === PlanStatus.active) {
+        const taskOverrides = {
+          ...(body.title !== undefined && { title: body.title }),
+          ...(body.description !== undefined && { description: body.description }),
+          ...(body.dueDate !== undefined && { dueDate: body.dueDate ? new Date(body.dueDate) : null }),
+          ...(body.priority !== undefined && { priority: body.priority }),
+          ...(body.repeatType !== undefined && { repeatType: body.repeatType }),
+          ...(body.sortOrder !== undefined && { sortOrder: body.sortOrder }),
+        };
+        const newPlan = await createTaskChangePlan(fastify, {
+          studentId,
+          sourcePlan: task.plan,
+          user,
+          changeReason: `编辑任务：${task.title}`,
+          tasks: task.plan.tasks.map((planTask) =>
+            taskCreateData(planTask, planTask.id === taskId ? taskOverrides : {}),
+          ),
+          detail: {
+            previousPlanId: task.plan.id,
+            previousVersion: task.plan.version,
+            taskId,
+            taskTitle: task.title,
+            changes: body,
+            changeReason: `编辑任务：${task.title}`,
+          } as unknown as Prisma.InputJsonValue,
+        });
+
+        return reply.send({
+          data: newPlan,
+          message: '任务变更已发起，等待学生确认',
+        });
+      }
 
       const updated = await fastify.prisma.periodPlanTask.update({
         where: { id: taskId },
@@ -955,12 +1133,38 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { studentId, taskId } = request.params as { studentId: string; taskId: string };
-      await assertStudentAccess(fastify, request.user as JwtPayload, studentId);
+      const user = request.user as JwtPayload;
+      await assertStudentAccess(fastify, user, studentId);
 
       const task = await fastify.prisma.periodPlanTask.findFirst({
         where: { id: taskId, plan: { studentId } },
+        include: { plan: { include: { tasks: { orderBy: { sortOrder: 'asc' } } } } },
       });
       if (!task) throw createError.notFound('任务不存在');
+
+      if (task.plan.status === PlanStatus.active) {
+        const newPlan = await createTaskChangePlan(fastify, {
+          studentId,
+          sourcePlan: task.plan,
+          user,
+          changeReason: `删除任务：${task.title}`,
+          tasks: task.plan.tasks
+            .filter((planTask) => planTask.id !== taskId)
+            .map((planTask) => taskCreateData(planTask)),
+          detail: {
+            previousPlanId: task.plan.id,
+            previousVersion: task.plan.version,
+            taskId,
+            taskTitle: task.title,
+            changeReason: `删除任务：${task.title}`,
+          } as unknown as Prisma.InputJsonValue,
+        });
+
+        return reply.send({
+          data: newPlan,
+          message: '任务变更已发起，等待学生确认',
+        });
+      }
 
       await fastify.prisma.periodPlanTask.delete({ where: { id: taskId } });
 
