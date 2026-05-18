@@ -6,7 +6,7 @@ import React, { useState, useMemo } from 'react';
 import {
   Row, Col, Card, Statistic, Table, Tag, Button, Modal, Form,
   Input, Select, DatePicker, message, Alert, Typography, Space,
-  Progress, Badge, Skeleton, Empty, Divider,
+  Progress, Badge, Skeleton, Empty, Divider, Drawer,
 } from 'antd';
 import {
   TeamOutlined, WarningOutlined, FileTextOutlined, ClockCircleOutlined,
@@ -14,12 +14,20 @@ import {
   SyncOutlined, MinusCircleOutlined, StarOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { useStudents, useCreateStudent } from '../../api/students.api';
+import { useStudents, useCreateStudent, type StudentListItem } from '../../api/students.api';
 import { useTeacherDashboardStats, type StageDistributionItem } from '../../api/stats.api';
 import { PERIOD_LABELS } from '../../types/plan';
 import { getErrorMessage } from '../../api/client';
 
 const { Text, Title } = Typography;
+
+type DashboardStudent = StudentListItem;
+
+interface StudentDrawerState {
+  title: string;
+  students: DashboardStudent[];
+  description?: string;
+}
 
 // ─── 常量 ─────────────────────────────────────────────────
 
@@ -66,7 +74,9 @@ const StageDistributionCard: React.FC<{
   total: number;
   noActivePlan: number;
   loading: boolean;
-}> = ({ distribution, total, noActivePlan, loading }) => {
+  onOpenStage: (code: string) => void;
+  onOpenNoActivePlan: () => void;
+}> = ({ distribution, total, noActivePlan, loading, onOpenStage, onOpenNoActivePlan }) => {
   if (loading) return <Card title="📊 学生阶段分布"><Skeleton active paragraph={{ rows: 5 }} /></Card>;
 
   return (
@@ -83,7 +93,11 @@ const StageDistributionCard: React.FC<{
             const label = PERIOD_LABELS[item.code] ?? item.stageName;
             const color = STAGE_COLORS[item.code] ?? '#1677ff';
             return (
-              <div key={item.code} style={{ marginBottom: 14 }}>
+              <div
+                key={item.code}
+                onClick={() => onOpenStage(item.code)}
+                style={{ marginBottom: 14, cursor: 'pointer' }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                   <Space size={6}>
                     <Tag color={color} style={{ margin: 0 }}>{item.code}</Tag>
@@ -104,7 +118,10 @@ const StageDistributionCard: React.FC<{
           {noActivePlan > 0 && (
             <>
               <Divider style={{ margin: '8px 0' }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div
+                onClick={onOpenNoActivePlan}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+              >
                 <Space size={6}>
                   <Tag color="#d9d9d9" style={{ margin: 0 }}>—</Tag>
                   <Text type="secondary" style={{ fontSize: 13 }}>暂无执行中规划</Text>
@@ -127,7 +144,8 @@ const InnoStatusCard: React.FC<{
     notStarted: number; rejected: number; rate: number;
   };
   loading: boolean;
-}> = ({ inno, loading }) => {
+  onOpenStatus: (status: string) => void;
+}> = ({ inno, loading, onOpenStatus }) => {
   if (loading) return <Card title="🎯 内诺跟踪总览"><Skeleton active paragraph={{ rows: 4 }} /></Card>;
 
   if (inno.total === 0) {
@@ -173,12 +191,15 @@ const InnoStatusCard: React.FC<{
       <Row gutter={[8, 8]}>
         {items.map((item) => (
           <Col span={12} key={item.key}>
-            <div style={{
+            <div
+              onClick={() => onOpenStatus(item.key)}
+              style={{
               padding: '10px 12px',
               borderRadius: 6,
               background: '#fafafa',
               border: `1px solid ${item.color}30`,
               textAlign: 'center',
+              cursor: 'pointer',
             }}>
               <div style={{ fontSize: 20, color: item.color, marginBottom: 2 }}>{item.icon}</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: item.color, lineHeight: 1.2 }}>
@@ -199,6 +220,7 @@ const TeacherDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [messageApi, ctxHolder] = message.useMessage();
   const [newStudentVisible, setNewStudentVisible] = useState(false);
+  const [studentDrawer, setStudentDrawer] = useState<StudentDrawerState | null>(null);
   const [form] = Form.useForm();
 
   const { data: studentsData, isLoading: studentsLoading } = useStudents({ pageSize: 100 });
@@ -221,6 +243,32 @@ const TeacherDashboard: React.FC = () => {
     () => students.filter(s => !s.periodPlans?.length),
     [students],
   );
+  const getActivePlan = (student: DashboardStudent) =>
+    student.periodPlans?.find((plan) => plan.status === 'active') ?? null;
+  const getInnoSchoolsByStatus = (student: DashboardStudent, status: string) =>
+    student.targetSchools?.filter((school) => school.innoTracking?.status === status) ?? [];
+
+  const openStudentDrawer = (title: string, list: DashboardStudent[], description?: string) => {
+    setStudentDrawer({ title, students: list, description });
+  };
+
+  const openStageStudents = (code: string) => {
+    const label = PERIOD_LABELS[code] ?? code;
+    openStudentDrawer(
+      `${code} ${label}`,
+      students.filter((student) => getActivePlan(student)?.periodCode === code),
+      '当前处于该执行阶段的学生',
+    );
+  };
+
+  const openInnoStudents = (status: string) => {
+    const config = INNO_STATUS_CONFIG[status as keyof typeof INNO_STATUS_CONFIG];
+    openStudentDrawer(
+      config?.label ?? status,
+      students.filter((student) => getInnoSchoolsByStatus(student, status).length > 0),
+      '拥有该内诺状态志望校的学生',
+    );
+  };
 
   const handleCreateStudent = async (values: Record<string, unknown>) => {
     try {
@@ -271,6 +319,52 @@ const TeacherDashboard: React.FC = () => {
     },
   ];
 
+  const drawerColumns = [
+    {
+      title: '姓名',
+      dataIndex: ['user', 'name'],
+      render: (name: string, record: DashboardStudent) => (
+        <a onClick={() => navigate(`/teacher/students/${record.id}`)}>{name}</a>
+      ),
+    },
+    { title: '手机', dataIndex: ['user', 'phone'], width: 130 },
+    {
+      title: '当前阶段',
+      width: 150,
+      render: (_: unknown, record: DashboardStudent) => {
+        const activePlan = getActivePlan(record);
+        if (!activePlan) return <Text type="secondary">暂无执行中规划</Text>;
+        return <Tag color={STAGE_COLORS[activePlan.periodCode ?? ''] ?? 'blue'}>{activePlan.periodCode} {PERIOD_LABELS[activePlan.periodCode ?? ''] ?? activePlan.stageName}</Tag>;
+      },
+    },
+    {
+      title: '风险/内诺',
+      render: (_: unknown, record: DashboardStudent) => (
+        <Space size={4} wrap>
+          {record.riskTags?.map((risk) => (
+            <Tag key={risk.tag.code} color={RISK_TAG_COLORS[risk.tag.code] ?? 'default'}>
+              {RISK_TAG_LABELS[risk.tag.code] ?? risk.tag.label}
+            </Tag>
+          ))}
+          {record.targetSchools?.some((school) => school.innoTracking) && (
+            <Tag color="blue">
+              内诺 {record.targetSchools.filter((school) => school.innoTracking).length} 校
+            </Tag>
+          )}
+        </Space>
+      ),
+    },
+    {
+      title: '操作',
+      width: 100,
+      render: (_: unknown, record: DashboardStudent) => (
+        <Button type="link" size="small" onClick={() => navigate(`/teacher/students/${record.id}`)}>
+          查看详情
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <>
       {ctxHolder}
@@ -278,7 +372,7 @@ const TeacherDashboard: React.FC = () => {
       {/* ─── 第一行：4个统计卡片 ─── */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <Card hoverable onClick={() => openStudentDrawer('在籍学生', students, '当前权限范围内的全部学生')}>
             <Statistic
               title="在籍学生"
               value={students.length}
@@ -289,7 +383,7 @@ const TeacherDashboard: React.FC = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <Card hoverable onClick={() => openStudentDrawer('风险学生', riskStudents, '当前存在未解除风险标签的学生')}>
             <Statistic
               title="风险学生"
               value={riskStudents.length}
@@ -300,7 +394,7 @@ const TeacherDashboard: React.FC = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <Card hoverable onClick={() => openStudentDrawer('规划待确认', pendingStudents, '存在待确认或变更待确认规划的学生')}>
             <Statistic
               title="规划待确认"
               value={pendingStudents.length}
@@ -311,7 +405,7 @@ const TeacherDashboard: React.FC = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <Card hoverable onClick={() => openStudentDrawer('未制定规划', noPlanStudents, '暂无待确认或执行中规划的学生')}>
             <Statistic
               title="未制定规划"
               value={noPlanStudents.length}
@@ -331,12 +425,15 @@ const TeacherDashboard: React.FC = () => {
             total={dashStats?.totalStudents ?? students.length}
             noActivePlan={dashStats?.noActivePlan ?? 0}
             loading={statsLoading}
+            onOpenStage={openStageStudents}
+            onOpenNoActivePlan={() => openStudentDrawer('暂无执行中规划', students.filter((student) => !getActivePlan(student)), '没有 active 状态规划的学生')}
           />
         </Col>
         <Col xs={24} lg={10}>
           <InnoStatusCard
             inno={dashStats?.inno ?? { total: 0, confirmed: 0, inProgress: 0, notStarted: 0, rejected: 0, rate: 0 }}
             loading={statsLoading}
+            onOpenStatus={openInnoStudents}
           />
         </Col>
       </Row>
@@ -476,6 +573,25 @@ const TeacherDashboard: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+      <Drawer
+        title={studentDrawer?.title}
+        open={!!studentDrawer}
+        onClose={() => setStudentDrawer(null)}
+        width={760}
+        destroyOnClose
+      >
+        {studentDrawer?.description && (
+          <Alert type="info" showIcon message={studentDrawer.description} style={{ marginBottom: 12 }} />
+        )}
+        <Table
+          rowKey="id"
+          size="small"
+          dataSource={studentDrawer?.students ?? []}
+          columns={drawerColumns}
+          pagination={{ pageSize: 8, showSizeChanger: false }}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无学生" /> }}
+        />
+      </Drawer>
     </>
   );
 };

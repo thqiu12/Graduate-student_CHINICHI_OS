@@ -232,6 +232,15 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
               take: 3,
               orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
             },
+            targetSchools: {
+              select: {
+                id: true,
+                universityName: true,
+                innoTracking: {
+                  select: { status: true },
+                },
+              },
+            },
           },
           skip: (page - 1) * pageSize,
           take: pageSize,

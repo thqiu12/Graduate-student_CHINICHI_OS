@@ -18,7 +18,12 @@ export interface StudentListItem {
   undergradGpa?: number;
   user: { id: string; name: string; phone?: string };
   riskTags?: Array<{ tag: { code: string; label: string; color?: string } }>;
-  periodPlans?: Array<{ id: string; status: string; sentAt?: string }>;
+  periodPlans?: Array<{ id: string; status: string; sentAt?: string; periodCode?: string; stageName?: string }>;
+  targetSchools?: Array<{
+    id: string;
+    universityName: string;
+    innoTracking?: { status: string } | null;
+  }>;
 }
 
 export interface CreateStudentBody {
