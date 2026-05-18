@@ -29,6 +29,7 @@ for (const phone of demoPhones) {
 }
 
 assertContains('frontend/src/App.tsx', 'path="/notifications"');
+assertContains('frontend/vite.config.ts', 'chunkSizeWarningLimit: 1300');
 assertContains('frontend/src/pages/admin/UserManagement.tsx', '导入学生CSV');
 assertContains('backend/src/routes/students.ts', '/students/import');
 assertContains('backend/src/routes/files.ts', '/students/:id/files/:fileId/versions/:versionId/download');

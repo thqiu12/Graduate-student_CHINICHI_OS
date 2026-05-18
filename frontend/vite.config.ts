@@ -31,6 +31,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    chunkSizeWarningLimit: 1300,
     rollupOptions: {
       output: {
         // 按包分割 chunk，优化加载性能
