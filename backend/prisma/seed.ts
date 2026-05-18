@@ -1,8 +1,9 @@
 // prisma/seed.ts
 // 知日塾大学院考学进度管理系统 - 数据库种子数据
-// 插入：2个学科、8个校区、5个角色、3个测试用户
+// 插入：2个学科、8个校区、4个角色、风险标签、管理员账号、3个测试用户
 
 import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
@@ -10,7 +11,7 @@ async function main(): Promise<void> {
   console.log('开始插入种子数据...');
 
   // ═══════════════════════════════════════
-  // 1. 学科（2个）
+  // 1. 学科（2个）- 使用任务要求的 code: bunka / rika
   // ═══════════════════════════════════════
   const liberalSubject = await prisma.subject.upsert({
     where: { id: 1 },
@@ -18,7 +19,7 @@ async function main(): Promise<void> {
     create: {
       id: 1,
       name: '文科大学院',
-      code: 'liberal',
+      code: 'bunka',
     },
   });
 
@@ -28,7 +29,7 @@ async function main(): Promise<void> {
     create: {
       id: 2,
       name: '理科大学院',
-      code: 'science',
+      code: 'rika',
     },
   });
 
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
   console.log('校区创建完成，共', campusData.length, '个校区');
 
   // ═══════════════════════════════════════
-  // 3. 角色（5个）
+  // 3. 角色（4个核心角色 + 1个超级管理员）
   // ═══════════════════════════════════════
   const roleData = [
     { id: 1, code: 'admin_total', name: '教务总负责人' },
@@ -98,7 +99,41 @@ async function main(): Promise<void> {
   console.log('风险标签创建完成，共', riskTagData.length, '个标签');
 
   // ═══════════════════════════════════════
-  // 5. 测试用户（3个）
+  // 5. 第一个管理员账号（任务要求）
+  // ═══════════════════════════════════════
+  const adminPassword = 'Admin@123456';
+  const adminPasswordHash = await bcrypt.hash(adminPassword, 10);
+
+  const firstAdmin = await prisma.user.upsert({
+    where: { phone: '13800138000' },
+    update: {},
+    create: {
+      id: '00000000-0000-0000-0000-000000000000',
+      name: '管理员',
+      phone: '13800138000',
+      isActive: true,
+      passwordHash: adminPasswordHash,
+    },
+  });
+
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: firstAdmin.id,
+        roleId: 1, // admin_total
+      },
+    },
+    update: {},
+    create: {
+      userId: firstAdmin.id,
+      roleId: 1,
+    },
+  });
+
+  console.log('管理员账号创建完成:', firstAdmin.name, '/', firstAdmin.phone);
+
+  // ═══════════════════════════════════════
+  // 6. 测试用户（3个，无密码）
   // ═══════════════════════════════════════
 
   // 测试管理员
@@ -227,6 +262,9 @@ async function main(): Promise<void> {
   console.log('  - 学生:', studentUser.name, '/', studentUser.phone);
 
   console.log('\n种子数据插入完成！');
+  console.log('\n管理员登录信息：');
+  console.log('  手机号: 13800138000');
+  console.log('  密码: Admin@123456');
 }
 
 main()

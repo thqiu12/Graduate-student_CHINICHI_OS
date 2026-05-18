@@ -209,6 +209,22 @@ export function useChangePlan(
   });
 }
 
+// ─── Plan Diff ────────────────────────────────────────────
+
+/**
+ * 获取规划变更 diff 数据
+ */
+export function usePlanDiff(studentId: string, planId: string) {
+  return useQuery({
+    queryKey: ['plan-diff', planId],
+    queryFn: async () => {
+      const res = await apiClient.get(`/students/${studentId}/plans/${planId}/diff`);
+      return res.data;
+    },
+    enabled: !!studentId && !!planId,
+  });
+}
+
 // ─── 任务完成切换 ─────────────────────────────────────────
 
 async function toggleTask(

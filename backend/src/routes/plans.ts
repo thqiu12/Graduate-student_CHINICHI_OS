@@ -823,6 +823,75 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
+  // ─── GET /students/:studentId/plans/:planId/diff ─── 规划变更Diff（基于操作日志）
+  fastify.get<{ Params: PlanParams }>(
+    '/students/:studentId/plans/:planId/diff',
+    {
+      preHandler: [
+        authenticate,
+        authorize([
+          Roles.ADMIN_TOTAL,
+          Roles.SUBJECT_HEAD,
+          Roles.TEACHER,
+          Roles.STUDENT,
+        ]),
+      ],
+    },
+    async (
+      request: FastifyRequest<{ Params: PlanParams }>,
+      reply: FastifyReply,
+    ) => {
+      const { studentId, planId } = request.params;
+      const user = request.user as JwtPayload;
+
+      // 验证规划存在且属于该学生
+      const plan = await fastify.prisma.periodPlan.findFirst({
+        where: { id: planId, studentId },
+      });
+
+      if (!plan) {
+        throw createError.notFound('规划', planId);
+      }
+
+      // 学生只能查看自己的规划
+      if (user.roles.includes(Roles.STUDENT)) {
+        const student = await fastify.prisma.student.findFirst({
+          where: { id: studentId, userId: user.sub },
+        });
+        if (!student) {
+          throw createError.forbidden('只能查看自己的规划');
+        }
+      }
+
+      // 查询该规划的操作日志（最近两条 update 类型）
+      const logs = await fastify.prisma.operationLog.findMany({
+        where: {
+          targetType: 'period_plan',
+          targetId: planId,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      });
+
+      // 将 BigInt id 转为字符串，避免JSON序列化问题
+      const safeLogs = logs.map((l) => ({ ...l, id: l.id.toString() }));
+
+      // 尝试获取最近一次 update 操作
+      const latestUpdate = safeLogs.find(
+        (l) => l.actionType === 'plan_change' || l.actionType === 'plan_update',
+      );
+
+      const hasChanges = !!plan.changeReason || safeLogs.length > 1;
+
+      return reply.send({
+        hasChanges,
+        changeReason: plan.changeReason ?? null,
+        changedAt: latestUpdate?.createdAt ?? plan.createdAt,
+        logs: safeLogs,
+      });
+    },
+  );
+
   // ─── DELETE /students/:studentId/tasks/:taskId ─── 删除任务（班主任）
   fastify.delete(
     '/students/:studentId/tasks/:taskId',

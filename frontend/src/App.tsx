@@ -28,6 +28,7 @@ const StudentDetailPage = lazy(() => import('./pages/teacher/StudentDetail'));
 // 管理端
 const SubjectHeadDashboard = lazy(() => import('./pages/management/SubjectHeadDashboard'));
 const AdminDashboard = lazy(() => import('./pages/management/AdminDashboard'));
+const UserManagementPage = lazy(() => import('./pages/admin/UserManagement'));
 
 // 共享
 const CalendarView = lazy(() => import('./pages/shared/CalendarView'));
@@ -132,6 +133,7 @@ const App: React.FC = () => {
                     <Route path="/subject-head" element={<SubjectHeadDashboard />} />
                     <Route path="/admin" element={<AdminDashboard />} />
                     <Route path="/admin/calendar" element={<CalendarView />} />
+                    <Route path="/admin/users" element={<UserManagementPage />} />
                   </Route>
                 </Route>
 

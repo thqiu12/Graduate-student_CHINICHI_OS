@@ -8,7 +8,7 @@ import {
   DashboardOutlined, TeamOutlined, BellOutlined, BarChartOutlined,
   LogoutOutlined, UserOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   FileTextOutlined, HomeOutlined, CheckSquareOutlined, LineChartOutlined, FolderOutlined,
-  CalendarOutlined,
+  CalendarOutlined, UserAddOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth.store';
@@ -60,6 +60,7 @@ const AppLayout: React.FC = () => {
         { key: '/teacher/students', icon: <TeamOutlined />, label: '全部学生' },
         { key: '/admin/calendar', icon: <CalendarOutlined />, label: '日历' },
         { key: '/admin/notifications', icon: <BellOutlined />, label: '通知管理' },
+        { key: '/admin/users', icon: <UserAddOutlined />, label: '账号管理' },
       );
     }
     return items;

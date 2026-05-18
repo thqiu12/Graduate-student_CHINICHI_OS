@@ -21,6 +21,10 @@ import {
   DatePicker,
   message,
   Tooltip,
+  Alert,
+  Row,
+  Col,
+  Badge,
 } from 'antd';
 import {
   PlusOutlined,
@@ -36,6 +40,7 @@ import {
   useChangePlan,
   useCreatePlan,
   useOperationLogs,
+  usePlanDiff,
 } from '../../../api/plans.api';
 import { PlanBanner } from '../../../components/PlanBanner';
 import { TaskItem } from '../../../components/TaskItem';
@@ -76,6 +81,164 @@ function getTimelineIcon(status: PlanStatus): React.ReactNode {
       return <ClockCircleFilled style={{ color: '#d9d9d9' }} />;
   }
 }
+
+// ─── 变更对比区域 ─────────────────────────────────────────
+
+interface PlanDiffCardProps {
+  studentId: string;
+  planId: string;
+}
+
+const PlanDiffCard: React.FC<PlanDiffCardProps> = ({ studentId, planId }) => {
+  const { data, isLoading } = usePlanDiff(studentId, planId);
+
+  if (isLoading) {
+    return <Spin size="small" tip="加载变更对比..." style={{ marginBottom: 16 }} />;
+  }
+
+  const diffData = data?.data ?? data;
+  if (!diffData) return null;
+
+  const changeReason: string | undefined = diffData.changeReason;
+  const diffs: Array<{ field: string; label: string; oldValue: string | null; newValue: string | null }> =
+    diffData.diffs ?? [];
+  const logs: Array<{ action: string; createdAt: string; operator?: string }> =
+    diffData.logs ?? [];
+  const previous = diffData.previous;
+  const current = diffData.current;
+
+  const changedFields = new Set(diffs.map((d: { field: string }) => d.field));
+
+  // 重点字段（黄色高亮）
+  const highlightFields = new Set(['endDate', 'taskCount']);
+
+  const allFields: Array<{ field: string; label: string; oldValue: string | null; newValue: string | null }> =
+    diffs.length > 0
+      ? diffs
+      : [
+          { field: 'stageName', label: '阶段名称', oldValue: previous?.stageName ?? null, newValue: current?.stageName ?? null },
+          { field: 'startDate', label: '开始日期', oldValue: previous?.startDate?.slice(0, 10) ?? null, newValue: current?.startDate?.slice(0, 10) ?? null },
+          { field: 'endDate', label: '截止日期', oldValue: previous?.endDate?.slice(0, 10) ?? null, newValue: current?.endDate?.slice(0, 10) ?? null },
+          { field: 'goal', label: '阶段目标', oldValue: previous?.goal ?? null, newValue: current?.goal ?? null },
+        ];
+
+  return (
+    <Card
+      title={
+        <Space>
+          <span style={{ color: '#fa8c16' }}>📋 规划已变更 - 请确认</span>
+          {changedFields.size > 0 && <Tag color="orange">{changedFields.size} 处变更</Tag>}
+        </Space>
+      }
+      size="small"
+      style={{ marginBottom: 16, border: '2px solid #fa8c16' }}
+      headStyle={{ background: '#fff7e6' }}
+      bodyStyle={{ padding: 0 }}
+    >
+      {changeReason && (
+        <div style={{ padding: '10px 12px', background: '#fffbe6', borderBottom: '1px solid #ffe58f' }}>
+          <Text strong style={{ color: '#d48806' }}>变更原因：</Text>
+          <Text style={{ color: '#614700' }}>{changeReason}</Text>
+        </div>
+      )}
+
+      {/* 字段对比表 */}
+      {allFields.length > 0 && (
+        <>
+          {/* 表头 */}
+          <Row style={{ borderBottom: '2px solid #f0f0f0' }}>
+            <Col span={4} style={{ padding: '8px 12px', fontWeight: 700, fontSize: 12, color: '#888', background: '#fafafa' }}>字段</Col>
+            <Col span={10} style={{ padding: '8px 12px', fontWeight: 700, fontSize: 12, color: '#ff4d4f', background: '#fff1f0', borderLeft: '1px solid #f0f0f0', borderRight: '1px solid #f0f0f0' }}>
+              旧版本
+            </Col>
+            <Col span={10} style={{ padding: '8px 12px', fontWeight: 700, fontSize: 12, color: '#52c41a', background: '#f6ffed' }}>
+              新版本
+            </Col>
+          </Row>
+          {allFields.map((f) => {
+            const isChanged = changedFields.has(f.field) || f.oldValue !== f.newValue;
+            const isHighlight = highlightFields.has(f.field) && isChanged;
+            return (
+              <Row key={f.field} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                <Col
+                  span={4}
+                  style={{
+                    padding: '8px 12px',
+                    fontWeight: 600,
+                    fontSize: 13,
+                    background: isHighlight ? '#fff7e6' : '#fafafa',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  {f.label}
+                  {isChanged && <Badge color={isHighlight ? 'orange' : 'red'} style={{ marginLeft: 4 }} />}
+                </Col>
+                <Col
+                  span={10}
+                  style={{
+                    padding: '8px 12px',
+                    background: isChanged ? '#fff1f0' : '#fff',
+                    borderLeft: '1px solid #f0f0f0',
+                    borderRight: '1px solid #f0f0f0',
+                  }}
+                >
+                  {isChanged ? (
+                    <Text delete type="secondary" style={{ whiteSpace: 'pre-wrap' }}>
+                      {f.oldValue ?? '（空）'}
+                    </Text>
+                  ) : (
+                    <Text style={{ color: '#333', whiteSpace: 'pre-wrap' }}>{f.oldValue ?? '（空）'}</Text>
+                  )}
+                </Col>
+                <Col
+                  span={10}
+                  style={{
+                    padding: '8px 12px',
+                    background: isHighlight ? '#fff7e6' : isChanged ? '#f6ffed' : '#fff',
+                  }}
+                >
+                  {isChanged ? (
+                    <Text style={{ color: isHighlight ? '#d48806' : '#389e0d', fontWeight: 600, whiteSpace: 'pre-wrap' }}>
+                      {f.newValue ?? '（空）'}
+                    </Text>
+                  ) : (
+                    <Text style={{ color: '#333', whiteSpace: 'pre-wrap' }}>{f.newValue ?? '（空）'}</Text>
+                  )}
+                </Col>
+              </Row>
+            );
+          })}
+        </>
+      )}
+
+      {/* 变更历史 Timeline */}
+      {logs.length > 0 && (
+        <div style={{ padding: '12px' }}>
+          <Text strong style={{ fontSize: 13 }}>变更历史</Text>
+          <Timeline
+            style={{ marginTop: 8 }}
+            items={logs.map((log, idx) => ({
+              key: idx,
+              color: 'orange',
+              children: (
+                <div>
+                  <Text style={{ fontSize: 12 }}>{log.action}</Text>
+                  {log.operator && <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>by {log.operator}</Text>}
+                  {log.createdAt && (
+                    <div style={{ fontSize: 11, color: '#999' }}>
+                      {new Date(log.createdAt).toLocaleString('zh-CN')}
+                    </div>
+                  )}
+                </div>
+              ),
+            }))}
+          />
+        </div>
+      )}
+    </Card>
+  );
+};
 
 // ─── 主组件 ───────────────────────────────────────────────
 
@@ -216,6 +379,11 @@ const StagesTab: React.FC<StagesTabProps> = ({ studentId, studentName }) => {
         isStudentView={false}
         onViewDetail={() => {/* 教师端不需要跳转 */}}
       />
+
+      {/* 变更对比区域（仅 change_pending 时显示） */}
+      {currentPlan && currentPlan.status === PlanStatus.ChangePending && (
+        <PlanDiffCard studentId={studentId} planId={currentPlan.id} />
+      )}
 
       {/* 阶段时间轴 */}
       <Card title="考学阶段时间轴" style={{ marginBottom: 16 }}>

@@ -98,3 +98,14 @@ export function useMarkAllRead(): UseMutationResult<{ count: number }, Error, vo
     },
   });
 }
+
+// ─── 推送消息给学生 ───────────────────────────────────────
+
+export function usePushNotification() {
+  return useMutation({
+    mutationFn: async (body: { studentId: string; title: string; content?: string }) => {
+      const res = await apiClient.post('/notifications/push', body);
+      return res.data;
+    },
+  });
+}

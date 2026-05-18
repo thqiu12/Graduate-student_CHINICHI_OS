@@ -1,7 +1,3 @@
-// schema.prisma
-// 知日塾大学院考学进度管理系统 - 数据库模型定义
-// 包含所有核心表：用户、角色、校区、学科、学生、规划、任务、日志等
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,472 +7,362 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ═══════════════════════════════════════
-// 用户与权限
-// ═══════════════════════════════════════
-
-model User {
-  id             String    @id @default(uuid()) @db.Uuid
-  name           String    @db.VarChar(50)
-  phone          String?   @unique @db.VarChar(20)
-  passwordHash   String?   @map("password_hash") @db.VarChar(100)
-  wechatOpenid   String?   @unique @map("wechat_openid") @db.VarChar(100)
-  email          String?   @db.VarChar(100)
-  avatarUrl      String?   @map("avatar_url")
-  isActive       Boolean   @default(true) @map("is_active")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
-
-  // 关联
-  userRoles            UserRole[]
-  student              Student?
-  teacherStudents      StudentTeacher[]    @relation("TeacherRelation")
-  teacherChanges       StudentTeacher[]    @relation("ChangedByRelation")
-  createdPlans         PeriodPlan[]        @relation("PlanCreatedBy")
-  confirmedPlans       PeriodPlan[]        @relation("PlanConfirmedBy")
-  planConfirmations    PlanConfirmation[]
-  operationLogs        OperationLog[]
-  taggedRiskTags       StudentRiskTag[]    @relation("TaggedByRelation")
-  removedRiskTags      StudentRiskTag[]    @relation("RemovedByRelation")
-  progressNodesDoneBy  SchoolProgressNode[]
-  innoContacts         InnoContact[]
-  coachingRecords      CoachingRecord[]
-  uploadedFiles        File[]
-  fileVersions         FileVersion[]
-  notifications        Notification[]
-
-  @@map("users")
+model campuses {
+  id         Int          @id @default(autoincrement())
+  name       String       @db.VarChar(50)
+  students   students[]
+  user_roles user_roles[]
 }
 
-// 角色定义：admin_total / subject_head / teacher / student
-model Role {
-  id        Int        @id @default(autoincrement())
-  code      String     @unique @db.VarChar(30)
-  name      String     @db.VarChar(50)
-  userRoles UserRole[]
+model coaching_records {
+  id             String           @id @db.Uuid
+  student_id     String           @db.Uuid
+  teacher_id     String           @db.Uuid
+  coached_at     DateTime         @db.Date
+  form           String?          @db.VarChar(20)
+  school_ids     String[]         @db.Uuid
+  content        String
+  next_date      DateTime?        @db.Date
+  created_at     DateTime         @default(now()) @db.Timestamptz(6)
+  students       students         @relation(fields: [student_id], references: [id])
+  users          users            @relation(fields: [teacher_id], references: [id])
+  coaching_todos coaching_todos[]
 
-  @@map("roles")
+  @@index([student_id, coached_at(sort: Desc)], map: "idx_coaching_student")
 }
 
-model UserRole {
-  userId    String    @map("user_id") @db.Uuid
-  roleId    Int       @map("role_id")
-  subjectId Int?      @map("subject_id")
-  campusId  Int?      @map("campus_id")
-  grantedAt DateTime  @default(now()) @map("granted_at") @db.Timestamptz
-
-  user    User     @relation(fields: [userId], references: [id])
-  role    Role     @relation(fields: [roleId], references: [id])
-  subject Subject? @relation(fields: [subjectId], references: [id])
-  campus  Campus?  @relation(fields: [campusId], references: [id])
-
-  @@id([userId, roleId])
-  @@map("user_roles")
+model coaching_todos {
+  id                Int                @id @default(autoincrement())
+  coaching_id       String             @db.Uuid
+  task_id           String?            @db.Uuid
+  title             String
+  due_date          DateTime?          @db.Date
+  created_at        DateTime           @default(now()) @db.Timestamptz(6)
+  coaching_records  coaching_records   @relation(fields: [coaching_id], references: [id])
+  period_plan_tasks period_plan_tasks? @relation(fields: [task_id], references: [id])
 }
 
-// ═══════════════════════════════════════
-// 校区与学科
-// ═══════════════════════════════════════
-
-model Campus {
-  id        Int        @id @default(autoincrement())
-  name      String     @db.VarChar(50)
-  userRoles UserRole[]
-  students  Student[]
-
-  @@map("campuses")
-}
-
-model Subject {
-  id        Int        @id @default(autoincrement())
-  name      String     @db.VarChar(50)
-  code      String     @db.VarChar(20)
-  userRoles UserRole[]
-  students  Student[]
-
-  @@map("subjects")
-}
-
-// ═══════════════════════════════════════
-// 学生档案
-// ═══════════════════════════════════════
-
-model Student {
-  id             String   @id @default(uuid()) @db.Uuid
-  userId         String   @unique @map("user_id") @db.Uuid
-  campusId       Int?     @map("campus_id")
-  subjectId      Int?     @map("subject_id")
-  entryDate      DateTime? @map("entry_date") @db.Date
-  targetYear     String?  @map("target_year") @db.VarChar(20)
-  targetSeason   String?  @map("target_season") @db.VarChar(30)
-  jlptLevel      String?  @map("jlpt_level") @db.VarChar(10)
-  jlptScore      Int?     @map("jlpt_score")
-  undergradMajor String?  @map("undergrad_major") @db.VarChar(100)
-  undergradGpa   Decimal? @map("undergrad_gpa") @db.Decimal(3, 2)
-  notes          String?
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  user            User              @relation(fields: [userId], references: [id])
-  campus          Campus?           @relation(fields: [campusId], references: [id])
-  subject         Subject?          @relation(fields: [subjectId], references: [id])
-  teachers        StudentTeacher[]
-  periodPlans     PeriodPlan[]
-  operationLogs   OperationLog[]
-  riskTags        StudentRiskTag[]
-  targetSchools   TargetSchool[]
-  coachingRecords CoachingRecord[]
-  files           File[]
-
-  @@index([campusId], name: "idx_students_campus")
-  @@index([subjectId], name: "idx_students_subject")
-  @@map("students")
-}
-
-// 班主任-学生关联（支持变更历史）
-model StudentTeacher {
-  id           Int       @id @default(autoincrement())
-  studentId    String    @map("student_id") @db.Uuid
-  teacherId    String    @map("teacher_id") @db.Uuid
-  startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz
-  endedAt      DateTime? @map("ended_at") @db.Timestamptz
-  changedBy    String?   @map("changed_by") @db.Uuid
-  changeReason String?   @map("change_reason")
-
-  student   Student @relation(fields: [studentId], references: [id])
-  teacher   User    @relation("TeacherRelation", fields: [teacherId], references: [id])
-  changedByUser User? @relation("ChangedByRelation", fields: [changedBy], references: [id])
-
-  @@map("student_teacher")
-}
-
-// ═══════════════════════════════════════
-// 规划与阶段
-// ═══════════════════════════════════════
-
-// 规划状态枚举
-enum PlanStatus {
-  draft          // 草稿
-  pending        // 待学生确认
-  change_pending // 变更待确认
-  active         // 已生效·执行中
-  completed      // 已完成
-  cancelled      // 已取消
-
-  @@map("plan_status")
-}
-
-// 学生的具体阶段规划（版本化）
-model PeriodPlan {
-  id             String     @id @default(uuid()) @db.Uuid
-  studentId      String     @map("student_id") @db.Uuid
-  periodCode     String     @map("period_code") @db.VarChar(20)
-  stageName      String     @map("stage_name") @db.VarChar(100)
-  goal           String?
-  startDate      DateTime   @map("start_date") @db.Date
-  endDate        DateTime   @map("end_date") @db.Date
-  version        Int        @default(1)
-  status         PlanStatus @default(draft)
-  changeReason   String?    @map("change_reason")
-  previousPlanId String?    @map("previous_plan_id") @db.Uuid
-  createdBy      String?    @map("created_by") @db.Uuid
-  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
-  sentAt         DateTime?  @map("sent_at") @db.Timestamptz
-  confirmedAt    DateTime?  @map("confirmed_at") @db.Timestamptz
-  confirmedBy    String?    @map("confirmed_by") @db.Uuid
-
-  student       Student           @relation(fields: [studentId], references: [id])
-  previousPlan  PeriodPlan?       @relation("PlanVersions", fields: [previousPlanId], references: [id])
-  nextPlans     PeriodPlan[]      @relation("PlanVersions")
-  createdByUser User?             @relation("PlanCreatedBy", fields: [createdBy], references: [id])
-  confirmedByUser User?           @relation("PlanConfirmedBy", fields: [confirmedBy], references: [id])
-  tasks         PeriodPlanTask[]
-  confirmations PlanConfirmation[]
-
-  @@unique([studentId, periodCode, version])
-  @@index([studentId, status], name: "idx_period_plans_student")
-  @@map("period_plans")
-}
-
-// 规划内的具体任务
-model PeriodPlanTask {
-  id          String    @id @default(uuid()) @db.Uuid
-  planId      String    @map("plan_id") @db.Uuid
-  title       String    @db.VarChar(200)
-  description String?
-  dueDate     DateTime? @map("due_date") @db.Date
-  dueTime     String?   @map("due_time") @db.VarChar(10)
-  priority    String    @default("中") @db.VarChar(10)
-  repeatType  String    @default("once") @map("repeat_type") @db.VarChar(20)
-  sortOrder   Int       @default(0) @map("sort_order")
-  status      String    @default("pending") @db.VarChar(20)
-  doneAt      DateTime? @map("done_at") @db.Timestamptz
-  doneNote    String?   @map("done_note")
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
-
-  plan         PeriodPlan     @relation(fields: [planId], references: [id], onDelete: Cascade)
-  coachingTodos CoachingTodo[]
-
-  @@index([planId, status], name: "idx_tasks_plan")
-  @@index([dueDate], name: "idx_tasks_due")
-  @@map("period_plan_tasks")
-}
-
-// 规划确认/异议记录
-model PlanConfirmation {
-  id        Int      @id @default(autoincrement())
-  planId    String   @map("plan_id") @db.Uuid
-  action    String   @db.VarChar(20)
-  actorId   String   @map("actor_id") @db.Uuid
-  content   String?
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  plan  PeriodPlan @relation(fields: [planId], references: [id])
-  actor User       @relation(fields: [actorId], references: [id])
-
-  @@map("plan_confirmations")
-}
-
-// ═══════════════════════════════════════
-// 操作日志（不可删除）
-// ═══════════════════════════════════════
-
-model OperationLog {
-  id         BigInt   @id @default(autoincrement())
-  studentId  String?  @map("student_id") @db.Uuid
-  actorId    String?  @map("actor_id") @db.Uuid
-  actorName  String?  @map("actor_name") @db.VarChar(50)
-  actionType String   @map("action_type") @db.VarChar(50)
-  targetType String?  @map("target_type") @db.VarChar(50)
-  targetId   String?  @map("target_id") @db.VarChar(100)
-  detail     Json?
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  student Student? @relation(fields: [studentId], references: [id])
-  actor   User?    @relation(fields: [actorId], references: [id])
-
-  @@index([studentId, createdAt(sort: Desc)], name: "idx_op_logs_student")
-  @@map("operation_logs")
-}
-
-// ═══════════════════════════════════════
-// 风险标签
-// ═══════════════════════════════════════
-
-model RiskTag {
-  id       Int              @id @default(autoincrement())
-  code     String           @unique @db.VarChar(50)
-  label    String           @db.VarChar(100)
-  color    String?          @db.VarChar(20)
-  students StudentRiskTag[]
-
-  @@map("risk_tags")
-}
-
-model StudentRiskTag {
-  id           Int       @id @default(autoincrement())
-  studentId    String    @map("student_id") @db.Uuid
-  tagId        Int       @map("tag_id")
-  reason       String
-  taggedBy     String    @map("tagged_by") @db.Uuid
-  taggedAt     DateTime  @default(now()) @map("tagged_at") @db.Timestamptz
-  removedAt    DateTime? @map("removed_at") @db.Timestamptz
-  removedBy    String?   @map("removed_by") @db.Uuid
-  removeReason String?   @map("remove_reason")
-
-  student     Student @relation(fields: [studentId], references: [id])
-  tag         RiskTag @relation(fields: [tagId], references: [id])
-  taggedByUser   User @relation("TaggedByRelation", fields: [taggedBy], references: [id])
-  removedByUser  User? @relation("RemovedByRelation", fields: [removedBy], references: [id])
-
-  @@index([studentId], name: "idx_risk_tags_student")
-  @@map("student_risk_tags")
-}
-
-// ═══════════════════════════════════════
-// 志望校与内诺
-// ═══════════════════════════════════════
-
-model TargetSchool {
-  id               String    @id @default(uuid()) @db.Uuid
-  studentId        String    @map("student_id") @db.Uuid
-  universityName   String    @map("university_name") @db.VarChar(200)
-  department       String?   @db.VarChar(200)
-  rank             Int?
-  professorName    String?   @map("professor_name") @db.VarChar(100)
-  professorUrl     String?   @map("professor_url")
-  examTypes        String[]  @map("exam_types")
-  applicationStart DateTime? @map("application_start") @db.Date
-  applicationEnd   DateTime? @map("application_end") @db.Date
-  examDate         DateTime? @map("exam_date") @db.Date
-  resultDate       DateTime? @map("result_date") @db.Date
-  result           String?   @db.VarChar(20)
-  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
-
-  student       Student              @relation(fields: [studentId], references: [id])
-  progressNodes SchoolProgressNode[]
-  innoTracking  InnoTracking?
-
-  @@index([studentId], name: "idx_school_student")
-  @@map("target_schools")
-}
-
-// 志望校进度节点
-model SchoolProgressNode {
-  id        Int       @id @default(autoincrement())
-  schoolId  String    @map("school_id") @db.Uuid
-  nodeCode  String    @map("node_code") @db.VarChar(50)
-  nodeName  String    @map("node_name") @db.VarChar(100)
-  isDone    Boolean   @default(false) @map("is_done")
-  doneAt    DateTime? @map("done_at") @db.Timestamptz
-  doneBy    String?   @map("done_by") @db.Uuid
-  sortOrder Int       @default(0) @map("sort_order")
-
-  school    TargetSchool @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  doneByUser User?       @relation(fields: [doneBy], references: [id])
-
-  @@map("school_progress_nodes")
-}
-
-// 内诺跟踪（理科专属）
-model InnoTracking {
-  id            String    @id @default(uuid()) @db.Uuid
-  schoolId      String    @unique @map("school_id") @db.Uuid
-  status        String    @default("not_started") @db.VarChar(20)
-  contactCount  Int       @default(0) @map("contact_count")
-  lastContactAt DateTime? @map("last_contact_at") @db.Date
-  confirmedAt   DateTime? @map("confirmed_at") @db.Date
-  notes         String?
-  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
-
-  school   TargetSchool  @relation(fields: [schoolId], references: [id])
-  contacts InnoContact[]
-
-  @@map("inno_tracking")
-}
-
-// 内诺沟通记录
-model InnoContact {
-  id          Int      @id @default(autoincrement())
-  trackingId  String   @map("tracking_id") @db.Uuid
-  method      String?  @db.VarChar(30)
-  contactDate DateTime? @map("contact_date") @db.Date
-  summary     String?
-  createdBy   String?  @map("created_by") @db.Uuid
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  tracking    InnoTracking @relation(fields: [trackingId], references: [id])
-  createdByUser User?      @relation(fields: [createdBy], references: [id])
-
-  @@map("inno_contacts")
-}
-
-// ═══════════════════════════════════════
-// 辅导记录
-// ═══════════════════════════════════════
-
-model CoachingRecord {
-  id         String    @id @default(uuid()) @db.Uuid
-  studentId  String    @map("student_id") @db.Uuid
-  teacherId  String    @map("teacher_id") @db.Uuid
-  coachedAt  DateTime  @map("coached_at") @db.Date
-  form       String?   @db.VarChar(20)
-  schoolIds  String[]  @map("school_ids") @db.Uuid
-  content    String
-  nextDate   DateTime? @map("next_date") @db.Date
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
-
-  student Student       @relation(fields: [studentId], references: [id])
-  teacher User          @relation(fields: [teacherId], references: [id])
-  todos   CoachingTodo[]
-
-  @@index([studentId, coachedAt(sort: Desc)], name: "idx_coaching_student")
-  @@map("coaching_records")
-}
-
-// 辅导记录关联的待办
-model CoachingTodo {
-  id         Int       @id @default(autoincrement())
-  coachingId String    @map("coaching_id") @db.Uuid
-  taskId     String?   @map("task_id") @db.Uuid
-  title      String
-  dueDate    DateTime? @map("due_date") @db.Date
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
-
-  coaching CoachingRecord  @relation(fields: [coachingId], references: [id])
-  task     PeriodPlanTask? @relation(fields: [taskId], references: [id])
-
-  @@map("coaching_todos")
-}
-
-// ═══════════════════════════════════════
-// 文件管理
-// ═══════════════════════════════════════
-
-model File {
-  id          String   @id @default(uuid()) @db.Uuid
-  studentId   String   @map("student_id") @db.Uuid
-  fileType    String   @map("file_type") @db.VarChar(50)
-  displayName String   @map("display_name") @db.VarChar(200)
-  uploadedBy  String   @map("uploaded_by") @db.Uuid
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  student  Student       @relation(fields: [studentId], references: [id])
-  uploader User          @relation(fields: [uploadedBy], references: [id])
-  versions FileVersion[]
-
-  @@map("files")
-}
-
-model FileVersion {
-  id          String   @id @default(uuid()) @db.Uuid
-  fileId      String   @map("file_id") @db.Uuid
-  versionNo   Int      @map("version_no")
-  ossKey      String   @map("oss_key")
-  fileSize    BigInt?  @map("file_size")
-  mimeType    String?  @map("mime_type") @db.VarChar(100)
-  uploadedBy  String   @map("uploaded_by") @db.Uuid
-  uploadedAt  DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+model file_versions {
+  id          String   @id @db.Uuid
+  file_id     String   @db.Uuid
+  version_no  Int
+  oss_key     String
+  file_size   BigInt?
+  mime_type   String?  @db.VarChar(100)
+  uploaded_by String   @db.Uuid
+  uploaded_at DateTime @default(now()) @db.Timestamptz(6)
   notes       String?
-
-  file     File @relation(fields: [fileId], references: [id])
-  uploader User @relation(fields: [uploadedBy], references: [id])
-
-  @@map("file_versions")
+  files       files    @relation(fields: [file_id], references: [id])
+  users       users    @relation(fields: [uploaded_by], references: [id])
 }
 
-// ═══════════════════════════════════════
-// 通知系统
-// ═══════════════════════════════════════
-
-model Notification {
-  id        String    @id @default(uuid()) @db.Uuid
-  userId    String    @map("user_id") @db.Uuid
-  type      String    @db.VarChar(50)
-  title     String    @db.VarChar(200)
-  content   String?
-  relatedId String?   @map("related_id") @db.Uuid
-  isRead    Boolean   @default(false) @map("is_read")
-  readAt    DateTime? @map("read_at") @db.Timestamptz
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
-
-  user          User                    @relation(fields: [userId], references: [id])
-  deliveries    NotificationDelivery[]
-
-  @@index([userId, isRead, createdAt(sort: Desc)], name: "idx_notifications_user")
-  @@map("notifications")
+model files {
+  id            String          @id @db.Uuid
+  student_id    String          @db.Uuid
+  file_type     String          @db.VarChar(50)
+  display_name  String          @db.VarChar(200)
+  uploaded_by   String          @db.Uuid
+  created_at    DateTime        @default(now()) @db.Timestamptz(6)
+  file_versions file_versions[]
+  students      students        @relation(fields: [student_id], references: [id])
+  users         users           @relation(fields: [uploaded_by], references: [id])
 }
 
-// 通知推送渠道记录
-model NotificationDelivery {
-  id             Int       @id @default(autoincrement())
-  notificationId String    @map("notification_id") @db.Uuid
-  channel        String    @db.VarChar(20)
-  status         String    @default("pending") @db.VarChar(20)
-  sentAt         DateTime? @map("sent_at") @db.Timestamptz
-  errorMsg       String?   @map("error_msg")
+model inno_contacts {
+  id            Int           @id @default(autoincrement())
+  tracking_id   String        @db.Uuid
+  method        String?       @db.VarChar(30)
+  contact_date  DateTime?     @db.Date
+  summary       String?
+  created_by    String?       @db.Uuid
+  created_at    DateTime      @default(now()) @db.Timestamptz(6)
+  users         users?        @relation(fields: [created_by], references: [id])
+  inno_tracking inno_tracking @relation(fields: [tracking_id], references: [id])
+}
 
-  notification Notification @relation(fields: [notificationId], references: [id])
+model inno_tracking {
+  id              String          @id @db.Uuid
+  school_id       String          @unique @db.Uuid
+  status          String          @default("not_started") @db.VarChar(20)
+  contact_count   Int             @default(0)
+  last_contact_at DateTime?       @db.Date
+  confirmed_at    DateTime?       @db.Date
+  notes           String?
+  updated_at      DateTime        @db.Timestamptz(6)
+  inno_contacts   inno_contacts[]
+  target_schools  target_schools  @relation(fields: [school_id], references: [id])
+}
 
-  @@map("notification_deliveries")
+model notification_deliveries {
+  id              Int           @id @default(autoincrement())
+  notification_id String        @db.Uuid
+  channel         String        @db.VarChar(20)
+  status          String        @default("pending") @db.VarChar(20)
+  sent_at         DateTime?     @db.Timestamptz(6)
+  error_msg       String?
+  notifications   notifications @relation(fields: [notification_id], references: [id])
+}
+
+model notifications {
+  id                      String                    @id @db.Uuid
+  user_id                 String                    @db.Uuid
+  type                    String                    @db.VarChar(50)
+  title                   String                    @db.VarChar(200)
+  content                 String?
+  related_id              String?                   @db.Uuid
+  is_read                 Boolean                   @default(false)
+  read_at                 DateTime?                 @db.Timestamptz(6)
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  notification_deliveries notification_deliveries[]
+  users                   users                     @relation(fields: [user_id], references: [id])
+
+  @@index([user_id, is_read, created_at(sort: Desc)], map: "idx_notifications_user")
+}
+
+model operation_logs {
+  id          BigInt    @id @default(autoincrement())
+  student_id  String?   @db.Uuid
+  actor_id    String?   @db.Uuid
+  actor_name  String?   @db.VarChar(50)
+  action_type String    @db.VarChar(50)
+  target_type String?   @db.VarChar(50)
+  target_id   String?   @db.VarChar(100)
+  detail      Json?
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  users       users?    @relation(fields: [actor_id], references: [id])
+  students    students? @relation(fields: [student_id], references: [id])
+
+  @@index([student_id, created_at(sort: Desc)], map: "idx_op_logs_student")
+}
+
+model period_plan_tasks {
+  id             String           @id @db.Uuid
+  plan_id        String           @db.Uuid
+  title          String           @db.VarChar(200)
+  description    String?
+  due_date       DateTime?        @db.Date
+  due_time       String?          @db.VarChar(10)
+  priority       String           @default("中") @db.VarChar(10)
+  repeat_type    String           @default("once") @db.VarChar(20)
+  sort_order     Int              @default(0)
+  status         String           @default("pending") @db.VarChar(20)
+  done_at        DateTime?        @db.Timestamptz(6)
+  done_note      String?
+  created_at     DateTime         @default(now()) @db.Timestamptz(6)
+  coaching_todos coaching_todos[]
+  period_plans   period_plans     @relation(fields: [plan_id], references: [id], onDelete: Cascade)
+
+  @@index([due_date], map: "idx_tasks_due")
+  @@index([plan_id, status], map: "idx_tasks_plan")
+}
+
+model period_plans {
+  id                                     String               @id @db.Uuid
+  student_id                             String               @db.Uuid
+  period_code                            String               @db.VarChar(20)
+  stage_name                             String               @db.VarChar(100)
+  goal                                   String?
+  start_date                             DateTime             @db.Date
+  end_date                               DateTime             @db.Date
+  version                                Int                  @default(1)
+  status                                 plan_status          @default(draft)
+  change_reason                          String?
+  previous_plan_id                       String?              @db.Uuid
+  created_by                             String?              @db.Uuid
+  created_at                             DateTime             @default(now()) @db.Timestamptz(6)
+  sent_at                                DateTime?            @db.Timestamptz(6)
+  confirmed_at                           DateTime?            @db.Timestamptz(6)
+  confirmed_by                           String?              @db.Uuid
+  period_plan_tasks                      period_plan_tasks[]
+  users_period_plans_confirmed_byTousers users?               @relation("period_plans_confirmed_byTousers", fields: [confirmed_by], references: [id])
+  users_period_plans_created_byTousers   users?               @relation("period_plans_created_byTousers", fields: [created_by], references: [id])
+  period_plans                           period_plans?        @relation("period_plansToperiod_plans", fields: [previous_plan_id], references: [id])
+  other_period_plans                     period_plans[]       @relation("period_plansToperiod_plans")
+  students                               students             @relation(fields: [student_id], references: [id])
+  plan_confirmations                     plan_confirmations[]
+
+  @@unique([student_id, period_code, version])
+  @@index([student_id, status], map: "idx_period_plans_student")
+}
+
+model plan_confirmations {
+  id           Int          @id @default(autoincrement())
+  plan_id      String       @db.Uuid
+  action       String       @db.VarChar(20)
+  actor_id     String       @db.Uuid
+  content      String?
+  created_at   DateTime     @default(now()) @db.Timestamptz(6)
+  users        users        @relation(fields: [actor_id], references: [id])
+  period_plans period_plans @relation(fields: [plan_id], references: [id])
+}
+
+model risk_tags {
+  id                Int                 @id @default(autoincrement())
+  code              String              @unique @db.VarChar(50)
+  label             String              @db.VarChar(100)
+  color             String?             @db.VarChar(20)
+  student_risk_tags student_risk_tags[]
+}
+
+model roles {
+  id         Int          @id @default(autoincrement())
+  code       String       @unique @db.VarChar(30)
+  name       String       @db.VarChar(50)
+  user_roles user_roles[]
+}
+
+model school_progress_nodes {
+  id             Int            @id @default(autoincrement())
+  school_id      String         @db.Uuid
+  node_code      String         @db.VarChar(50)
+  node_name      String         @db.VarChar(100)
+  is_done        Boolean        @default(false)
+  done_at        DateTime?      @db.Timestamptz(6)
+  done_by        String?        @db.Uuid
+  sort_order     Int            @default(0)
+  users          users?         @relation(fields: [done_by], references: [id])
+  target_schools target_schools @relation(fields: [school_id], references: [id], onDelete: Cascade)
+}
+
+model student_risk_tags {
+  id                                        Int       @id @default(autoincrement())
+  student_id                                String    @db.Uuid
+  tag_id                                    Int
+  reason                                    String
+  tagged_by                                 String    @db.Uuid
+  tagged_at                                 DateTime  @default(now()) @db.Timestamptz(6)
+  removed_at                                DateTime? @db.Timestamptz(6)
+  removed_by                                String?   @db.Uuid
+  remove_reason                             String?
+  users_student_risk_tags_removed_byTousers users?    @relation("student_risk_tags_removed_byTousers", fields: [removed_by], references: [id])
+  students                                  students  @relation(fields: [student_id], references: [id])
+  risk_tags                                 risk_tags @relation(fields: [tag_id], references: [id])
+  users_student_risk_tags_tagged_byTousers  users     @relation("student_risk_tags_tagged_byTousers", fields: [tagged_by], references: [id])
+
+  @@index([student_id], map: "idx_risk_tags_student")
+}
+
+model student_teacher {
+  id                                      Int       @id @default(autoincrement())
+  student_id                              String    @db.Uuid
+  teacher_id                              String    @db.Uuid
+  started_at                              DateTime  @default(now()) @db.Timestamptz(6)
+  ended_at                                DateTime? @db.Timestamptz(6)
+  changed_by                              String?   @db.Uuid
+  change_reason                           String?
+  users_student_teacher_changed_byTousers users?    @relation("student_teacher_changed_byTousers", fields: [changed_by], references: [id])
+  students                                students  @relation(fields: [student_id], references: [id])
+  users_student_teacher_teacher_idTousers users     @relation("student_teacher_teacher_idTousers", fields: [teacher_id], references: [id])
+}
+
+model students {
+  id                String              @id @db.Uuid
+  user_id           String              @unique @db.Uuid
+  campus_id         Int?
+  subject_id        Int?
+  entry_date        DateTime?           @db.Date
+  target_year       String?             @db.VarChar(20)
+  target_season     String?             @db.VarChar(30)
+  jlpt_level        String?             @db.VarChar(10)
+  jlpt_score        Int?
+  undergrad_major   String?             @db.VarChar(100)
+  undergrad_gpa     Decimal?            @db.Decimal(3, 2)
+  notes             String?
+  created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime            @db.Timestamptz(6)
+  coaching_records  coaching_records[]
+  files             files[]
+  operation_logs    operation_logs[]
+  period_plans      period_plans[]
+  student_risk_tags student_risk_tags[]
+  student_teacher   student_teacher[]
+  campuses          campuses?           @relation(fields: [campus_id], references: [id])
+  subjects          subjects?           @relation(fields: [subject_id], references: [id])
+  users             users               @relation(fields: [user_id], references: [id])
+  target_schools    target_schools[]
+
+  @@index([campus_id], map: "idx_students_campus")
+  @@index([subject_id], map: "idx_students_subject")
+}
+
+model subjects {
+  id         Int          @id @default(autoincrement())
+  name       String       @db.VarChar(50)
+  code       String       @db.VarChar(20)
+  students   students[]
+  user_roles user_roles[]
+}
+
+model target_schools {
+  id                    String                  @id @db.Uuid
+  student_id            String                  @db.Uuid
+  university_name       String                  @db.VarChar(200)
+  department            String?                 @db.VarChar(200)
+  rank                  Int?
+  professor_name        String?                 @db.VarChar(100)
+  professor_url         String?
+  exam_types            String[]
+  application_start     DateTime?               @db.Date
+  application_end       DateTime?               @db.Date
+  exam_date             DateTime?               @db.Date
+  result_date           DateTime?               @db.Date
+  result                String?                 @db.VarChar(20)
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  inno_tracking         inno_tracking?
+  school_progress_nodes school_progress_nodes[]
+  students              students                @relation(fields: [student_id], references: [id])
+
+  @@index([student_id], map: "idx_school_student")
+}
+
+model user_roles {
+  user_id    String    @db.Uuid
+  role_id    Int
+  subject_id Int?
+  campus_id  Int?
+  granted_at DateTime  @default(now()) @db.Timestamptz(6)
+  campuses   campuses? @relation(fields: [campus_id], references: [id])
+  roles      roles     @relation(fields: [role_id], references: [id])
+  subjects   subjects? @relation(fields: [subject_id], references: [id])
+  users      users     @relation(fields: [user_id], references: [id])
+
+  @@id([user_id, role_id])
+}
+
+model users {
+  id                                                    String                  @id @db.Uuid
+  name                                                  String                  @db.VarChar(50)
+  phone                                                 String?                 @unique @db.VarChar(20)
+  wechat_openid                                         String?                 @unique @db.VarChar(100)
+  email                                                 String?                 @db.VarChar(100)
+  avatar_url                                            String?
+  is_active                                             Boolean                 @default(true)
+  created_at                                            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at                                            DateTime                @db.Timestamptz(6)
+  password_hash                                         String?                 @db.VarChar(100)
+  coaching_records                                      coaching_records[]
+  file_versions                                         file_versions[]
+  files                                                 files[]
+  inno_contacts                                         inno_contacts[]
+  notifications                                         notifications[]
+  operation_logs                                        operation_logs[]
+  period_plans_period_plans_confirmed_byTousers         period_plans[]          @relation("period_plans_confirmed_byTousers")
+  period_plans_period_plans_created_byTousers           period_plans[]          @relation("period_plans_created_byTousers")
+  plan_confirmations                                    plan_confirmations[]
+  school_progress_nodes                                 school_progress_nodes[]
+  student_risk_tags_student_risk_tags_removed_byTousers student_risk_tags[]     @relation("student_risk_tags_removed_byTousers")
+  student_risk_tags_student_risk_tags_tagged_byTousers  student_risk_tags[]     @relation("student_risk_tags_tagged_byTousers")
+  student_teacher_student_teacher_changed_byTousers     student_teacher[]       @relation("student_teacher_changed_byTousers")
+  student_teacher_student_teacher_teacher_idTousers     student_teacher[]       @relation("student_teacher_teacher_idTousers")
+  students                                              students?
+  user_roles                                            user_roles[]
+}
+
+enum plan_status {
+  draft
+  pending
+  change_pending
+  active
+  completed
+  cancelled
 }

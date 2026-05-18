@@ -21,6 +21,7 @@ import { riskTagRoutes } from './routes/risk-tags';
 import { fileRoutes } from './routes/files';
 import { innoRoutes } from './routes/inno';
 import { statsRoutes } from './routes/stats';
+import { userRoutes } from './routes/users';
 
 // 工具
 import { AppError } from './utils/errors';
@@ -148,6 +149,7 @@ async function buildApp(): Promise<FastifyInstance> {
         await fileRoutes(app);
         await innoRoutes(app);
         await statsRoutes(app);
+        await userRoutes(app);
       });
     },
     { prefix: '/api' },

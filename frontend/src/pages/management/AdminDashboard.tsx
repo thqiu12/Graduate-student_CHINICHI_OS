@@ -8,7 +8,7 @@ import {
 } from 'antd';
 import {
   TeamOutlined, WarningOutlined, ClockCircleOutlined,
-  DownloadOutlined, TrophyOutlined,
+  DownloadOutlined, TrophyOutlined, UserAddOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useStatsOverview, useExamSeasonStats, useAlerts } from '../../api/stats.api';
@@ -153,6 +153,14 @@ const AdminDashboard: React.FC = () => {
                 <Button block onClick={() => navigate('/teacher/students')}>查看全部学生</Button>
                 <Button block type="dashed" onClick={handleExport} icon={<DownloadOutlined />}>
                   导出数据（权限专享）
+                </Button>
+                <Button
+                  block
+                  type="primary"
+                  icon={<UserAddOutlined />}
+                  onClick={() => navigate('/admin/users')}
+                >
+                  账号管理
                 </Button>
               </Space>
             </Card>

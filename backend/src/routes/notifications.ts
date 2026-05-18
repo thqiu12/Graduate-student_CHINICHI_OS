@@ -148,7 +148,7 @@ export async function notificationRoutes(fastify: FastifyInstance): Promise<void
 
   // POST /api/notifications/push - 班主任手动推送给学生
   fastify.post<{
-    Body: { studentId: string; title: string; content: string; type?: string };
+    Body: { studentId: string; title: string; content?: string };
   }>(
     '/notifications/push',
     {
@@ -159,14 +159,14 @@ export async function notificationRoutes(fastify: FastifyInstance): Promise<void
     },
     async (
       request: FastifyRequest<{
-        Body: { studentId: string; title: string; content: string; type?: string };
+        Body: { studentId: string; title: string; content?: string };
       }>,
       reply: FastifyReply,
     ) => {
-      const { studentId, title, content, type = 'teacher_push' } = request.body;
+      const { studentId, title, content } = request.body;
 
-      if (!studentId || !title || !content) {
-        throw new AppError(ErrorCode.VALIDATION_ERROR, '学生ID、标题、内容不能为空');
+      if (!studentId || !title) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, '学生ID和标题不能为空');
       }
 
       // 找到学生的 userId
@@ -182,9 +182,9 @@ export async function notificationRoutes(fastify: FastifyInstance): Promise<void
       const notification = await fastify.prisma.notification.create({
         data: {
           userId: student.userId,
-          type,
+          type: 'teacher_push',
           title,
-          content,
+          content: content ?? null,
           relatedId: studentId,
         },
       });
@@ -200,8 +200,8 @@ export async function notificationRoutes(fastify: FastifyInstance): Promise<void
       });
 
       return reply.status(201).send({
-        data: notification,
-        message: '推送通知发送成功',
+        success: true,
+        notificationId: notification.id,
       });
     },
   );

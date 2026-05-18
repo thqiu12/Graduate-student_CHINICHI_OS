@@ -9,13 +9,14 @@ import {
 } from 'antd';
 import {
   PlusOutlined, UploadOutlined, DeleteOutlined, EyeOutlined,
-  FileTextOutlined, ExperimentOutlined,
+  FileTextOutlined, ExperimentOutlined, NotificationOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { useStudent } from '../../../api/students.api';
 import { useCoachingRecords, useAddCoachingRecord } from '../../../api/coaching.api';
 import { useTargetSchools, useAddSchool, useDeleteSchool } from '../../../api/schools.api';
+import { usePushNotification } from '../../../api/notifications.api';
 import StagesTab from './StagesTab';
 import TasksTab from './TasksTab';
 import GanttTab from './GanttTab';
@@ -361,19 +362,45 @@ const BasicInfoTab: React.FC<{ student: any }> = ({ student }) => {
 const StudentDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [messageApi, ctxHolder] = message.useMessage();
   const { data: student, isLoading } = useStudent(id ?? '');
+
+  // 推送消息状态
+  const [pushModalOpen, setPushModalOpen] = useState(false);
+  const [pushForm] = Form.useForm<{ title: string; content?: string }>();
+  const pushMutation = usePushNotification();
+
+  const handlePushNotification = async (values: { title: string; content?: string }) => {
+    if (!id) return;
+    try {
+      await pushMutation.mutateAsync({ studentId: id, title: values.title, content: values.content });
+      messageApi.success('消息已推送');
+      setPushModalOpen(false);
+      pushForm.resetFields();
+    } catch (_e) {
+      messageApi.error('推送失败，请重试');
+    }
+  };
 
   if (isLoading) return <div style={{ padding: 40, textAlign: 'center' }}><Spin size="large" /></div>;
   if (!student) return <div style={{ padding: 40 }}>学生不存在</div>;
 
   return (
     <div>
+      {ctxHolder}
       {/* 页面头部 */}
       <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', gap: 16 }}>
         <Button onClick={() => navigate(-1)}>← 返回</Button>
         <Title level={4} style={{ margin: 0 }}>
           {student.user?.name} 的考学档案
         </Title>
+        <Button
+          icon={<NotificationOutlined />}
+          onClick={() => setPushModalOpen(true)}
+          style={{ marginLeft: 'auto' }}
+        >
+          推送消息
+        </Button>
       </div>
 
       <Tabs
@@ -389,6 +416,39 @@ const StudentDetail: React.FC = () => {
           { key: 'gantt', label: '📊 规划总览', children: <GanttTab studentId={id ?? ''} studentName={student.user?.name ?? ''} /> },
         ]}
       />
+
+      {/* 推送消息 Modal */}
+      <Modal
+        title="推送消息给学生"
+        open={pushModalOpen}
+        onCancel={() => {
+          setPushModalOpen(false);
+          pushForm.resetFields();
+        }}
+        onOk={() => pushForm.submit()}
+        confirmLoading={pushMutation.isPending}
+        okText="推送"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Form
+          form={pushForm}
+          layout="vertical"
+          onFinish={handlePushNotification}
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            name="title"
+            label="标题"
+            rules={[{ required: true, message: '请输入消息标题' }]}
+          >
+            <Input placeholder="请输入消息标题" />
+          </Form.Item>
+          <Form.Item name="content" label="内容（可选）">
+            <Input.TextArea rows={4} placeholder="请输入消息内容（可选）" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };
