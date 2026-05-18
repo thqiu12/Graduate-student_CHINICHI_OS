@@ -47,6 +47,11 @@ const changePlanSchema = z.object({
   endDate: z.string().optional(),
 });
 
+const toggleTaskSchema = z.object({
+  done: z.boolean(),
+  doneNote: z.string().optional(),
+});
+
 type CreatePlanBody = z.infer<typeof createPlanSchema>;
 type RejectPlanBody = z.infer<typeof rejectPlanSchema>;
 type ChangePlanBody = z.infer<typeof changePlanSchema>;
@@ -867,7 +872,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { studentId, taskId } = request.params as { studentId: string; taskId: string };
-      const body = request.body as { done: boolean; doneNote?: string };
+      const body = toggleTaskSchema.parse(request.body);
       const user = request.user as JwtPayload;
 
       await assertStudentAccess(fastify, user, studentId);
@@ -881,14 +886,34 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       });
       if (!task) throw createError.notFound('任务不存在');
 
-      const newStatus = body.done ? 'done' : 'pending';
-      const updated = await fastify.prisma.periodPlanTask.update({
-        where: { id: taskId },
-        data: {
-          status: newStatus,
-          doneAt: body.done ? new Date() : null,
-          doneNote: body.done ? (body.doneNote ?? null) : null,
-        },
+      const updated = await fastify.prisma.$transaction(async (tx) => {
+        const newStatus = body.done ? 'done' : 'pending';
+        const nextTask = await tx.periodPlanTask.update({
+          where: { id: taskId },
+          data: {
+            status: newStatus,
+            doneAt: body.done ? new Date() : null,
+            doneNote: body.done ? (body.doneNote ?? null) : null,
+          },
+        });
+
+        await tx.operationLog.create({
+          data: {
+            studentId,
+            actorId: user.sub,
+            actorName: user.name,
+            actionType: body.done ? 'task_done' : 'task_reopen',
+            targetType: 'period_plan_task',
+            targetId: taskId,
+            detail: {
+              planId: task.planId,
+              taskTitle: task.title,
+              doneNote: body.done ? (body.doneNote ?? null) : null,
+            } as any,
+          },
+        });
+
+        return nextTask;
       });
 
       return reply.send({ data: updated, message: body.done ? '任务已完成' : '任务已取消完成' });

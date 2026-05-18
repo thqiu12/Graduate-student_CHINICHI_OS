@@ -272,6 +272,7 @@ export function useToggleTask(
     onSuccess: () => {
       // 刷新规划列表（任务状态在规划内嵌返回）
       queryClient.invalidateQueries({ queryKey: planQueryKeys.all(studentId) });
+      queryClient.invalidateQueries({ queryKey: planQueryKeys.logs(studentId) });
     },
   });
 }

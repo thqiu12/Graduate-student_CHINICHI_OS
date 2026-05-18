@@ -39,6 +39,9 @@ assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', '已上传�
 assertContains('backend/src/routes/plans.ts', 'PlanStatus.cancelled');
 assertContains('backend/src/routes/plans.ts', 'createInAppNotification');
 assertContains('backend/src/routes/plans.ts', 'notificationDelivery.create');
+assertContains('backend/src/routes/plans.ts', 'task_done');
+assertContains('backend/src/routes/plans.ts', 'task_reopen');
+assertContains('frontend/src/api/plans.api.ts', 'planQueryKeys.logs(studentId)');
 assertContains('backend/src/routes/schools.ts', "node.nodeCode === 'inno'");
 assertContains('backend/src/routes/schools.ts', 'removedInnoTracking');
 assertContains('backend/src/routes/inno.ts', "nodeCode: 'inno'");
