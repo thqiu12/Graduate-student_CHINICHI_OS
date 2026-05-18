@@ -29,6 +29,7 @@ for (const phone of demoPhones) {
 }
 
 assertContains('frontend/src/App.tsx', 'path="/notifications"');
+assertContains('frontend/src/App.tsx', 'RequireAuthenticated');
 assertContains('frontend/vite.config.ts', 'chunkSizeWarningLimit: 1300');
 assertContains('frontend/src/api/notifications.api.ts', 'plan_unconfirmed_teacher');
 assertContains('frontend/src/api/notifications.api.ts', 'weekly_summary_dept');

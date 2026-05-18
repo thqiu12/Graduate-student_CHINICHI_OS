@@ -48,6 +48,13 @@ const PageLoading: React.FC = () => (
   </div>
 );
 
+// ─── 路由守卫：已登录用户 ──────────────────────────────────
+const RequireAuthenticated: React.FC = () => {
+  const { isAuthenticated } = useAuthStore();
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  return <Outlet />;
+};
+
 // ─── 路由守卫：学生 ────────────────────────────────────────
 const RequireStudent: React.FC = () => {
   const { isAuthenticated, isStudent } = useAuthStore();
@@ -105,6 +112,13 @@ const App: React.FC = () => {
                 <Route path="/" element={<RootRedirect />} />
                 <Route path="/login" element={<LoginPage />} />
 
+                {/* ─── 共享登录路由（含布局）────────── */}
+                <Route element={<RequireAuthenticated />}>
+                  <Route element={<AppLayout />}>
+                    <Route path="/notifications" element={<NotificationsPage />} />
+                  </Route>
+                </Route>
+
                 {/* ─── 学生路由（含布局）──────────── */}
                 <Route element={<RequireStudent />}>
                   <Route element={<AppLayout />}>
@@ -124,7 +138,6 @@ const App: React.FC = () => {
                     <Route path="/teacher/students" element={<StudentListPage />} />
                     <Route path="/teacher/students/:id" element={<StudentDetailPage />} />
                     <Route path="/teacher/calendar" element={<CalendarView />} />
-                    <Route path="/notifications" element={<NotificationsPage />} />
                   </Route>
                 </Route>
 
