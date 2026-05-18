@@ -38,6 +38,7 @@ assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', 'teacher-st
 assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', '已上传文件');
 assertContains('backend/src/routes/plans.ts', 'PlanStatus.cancelled');
 assertContains('backend/src/routes/schools.ts', "node.nodeCode === 'inno'");
+assertContains('backend/src/routes/schools.ts', 'removedInnoTracking');
 assertContains('backend/src/routes/inno.ts', "nodeCode: 'inno'");
 assertContains('backend/src/routes/inno.ts', 'inno_status_update');
 assertContains('backend/src/routes/inno.ts', 'inno_contact_add');

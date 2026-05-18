@@ -182,15 +182,30 @@ export async function schoolRoutes(fastify: FastifyInstance): Promise<void> {
       const school = await fastify.prisma.targetSchool.findFirst({ where: { id: sid, studentId: id } });
       if (!school) throw new AppError(ErrorCode.NOT_FOUND, '志望校不存在', 404);
 
-      await fastify.prisma.targetSchool.delete({ where: { id: sid } });
+      await fastify.prisma.$transaction(async (tx) => {
+        const tracking = await tx.innoTracking.findUnique({
+          where: { schoolId: sid },
+          select: { id: true },
+        });
+        if (tracking) {
+          await tx.innoContact.deleteMany({ where: { trackingId: tracking.id } });
+          await tx.innoTracking.delete({ where: { id: tracking.id } });
+        }
 
-      await fastify.prisma.operationLog.create({
-        data: {
-          studentId: id,
-          actorId: user.sub,
-          actionType: 'school_remove',
-          detail: { schoolId: sid, schoolName: school.universityName } as any,
-        },
+        await tx.targetSchool.delete({ where: { id: sid } });
+
+        await tx.operationLog.create({
+          data: {
+            studentId: id,
+            actorId: user.sub,
+            actionType: 'school_remove',
+            detail: {
+              schoolId: sid,
+              schoolName: school.universityName,
+              removedInnoTracking: !!tracking,
+            } as any,
+          },
+        });
       });
 
       return reply.status(204).send();
