@@ -70,6 +70,22 @@ export async function runCheckOverdueTasks(prisma: PrismaClient): Promise<void> 
       where: { id: task.id },
       data: { status: 'overdue' },
     });
+    await prisma.operationLog.create({
+      data: {
+        studentId: student.id,
+        actorId: null,
+        actorName: '系统自动',
+        actionType: 'task_overdue',
+        targetType: 'period_plan_task',
+        targetId: task.id,
+        detail: {
+          planId: task.planId,
+          taskTitle: task.title,
+          dueDate: task.dueDate,
+          triggeredAt: new Date().toISOString(),
+        },
+      },
+    });
     updatedCount++;
 
     const dueDateStr = task.dueDate

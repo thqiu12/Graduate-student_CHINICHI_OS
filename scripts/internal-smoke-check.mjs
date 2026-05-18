@@ -54,6 +54,7 @@ assertContains('frontend/src/api/coaching.api.ts', 'planQueryKeys.all(studentId)
 assertContains('frontend/src/pages/teacher/StudentDetail/StagesTab.tsx', 'getErrorMessage');
 assertContains('frontend/src/pages/teacher/StudentDetail/TasksTab.tsx', 'getErrorMessage');
 assertContains('backend/src/jobs/check-overdue-tasks.job.ts', 'createInAppNotification');
+assertContains('backend/src/jobs/check-overdue-tasks.job.ts', "actionType: 'task_overdue'");
 assertContains('backend/src/jobs/check-unconfirmed-plans.job.ts', 'createInAppNotification');
 assertContains('backend/src/jobs/check-unset-plans.job.ts', 'createInAppNotification');
 assertContains('backend/src/jobs/weekly-summary-teacher.job.ts', 'createInAppNotification');
