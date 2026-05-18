@@ -64,7 +64,9 @@ assertContains('backend/src/jobs/check-overdue-tasks.job.ts', "actionType: 'task
 assertContains('backend/src/jobs/check-unconfirmed-plans.job.ts', 'createInAppNotification');
 assertContains('backend/src/jobs/check-unset-plans.job.ts', 'createInAppNotification');
 assertContains('backend/src/jobs/weekly-summary-teacher.job.ts', 'createInAppNotification');
+assertContains('backend/src/jobs/weekly-summary-teacher.job.ts', 'existingWeeklySummary');
 assertContains('backend/src/jobs/weekly-summary-dept.job.ts', 'createInAppNotification');
+assertContains('backend/src/jobs/weekly-summary-dept.job.ts', 'existingWeeklySummary');
 assertContains('backend/src/routes/schools.ts', "node.nodeCode === 'inno'");
 assertContains('backend/src/routes/schools.ts', 'removedInnoTracking');
 assertContains('backend/src/routes/schools.ts', "targetType: 'target_school'");

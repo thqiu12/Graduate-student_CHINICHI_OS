@@ -115,6 +115,19 @@ export async function runWeeklySummaryTeacher(prisma: PrismaClient): Promise<voi
         : '本周无风险学生，继续保持！',
     ].join('\n');
 
+    const existingWeeklySummary = await prisma.notification.findFirst({
+      where: {
+        userId: teacherId,
+        type: 'weekly_summary_teacher',
+        title,
+        createdAt: { gte: weekStart, lte: weekEnd },
+      },
+    });
+    if (existingWeeklySummary) {
+      console.log(`[weekly-summary-teacher] 班主任 ${teacherName} 本周周报已发送，跳过`);
+      continue;
+    }
+
     // 发送周报通知
     await createInAppNotification(prisma, {
       userId: teacherId,

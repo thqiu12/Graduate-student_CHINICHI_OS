@@ -67,11 +67,25 @@ export async function runWeeklySummaryDept(prisma: PrismaClient): Promise<void> 
     const totalStudentCount = studentIds.length;
 
     if (totalStudentCount === 0) {
+      const title = `[周报] ${subjectName} 学科周报`;
+      const existingWeeklySummary = await prisma.notification.findFirst({
+        where: {
+          userId: headUserId,
+          type: 'weekly_summary_dept',
+          title,
+          createdAt: { gte: weekStart, lte: weekEnd },
+        },
+      });
+      if (existingWeeklySummary) {
+        console.log(`[weekly-summary-dept] 学科负责人 ${headUserName} 的 ${subjectName} 空周报已发送，跳过`);
+        continue;
+      }
+
       // 学科下没有学生，发简短通知
       await createInAppNotification(prisma, {
         userId: headUserId,
         type: 'weekly_summary_dept',
-        title: `[周报] ${subjectName} 学科周报`,
+        title,
         content: `本周「${subjectName}」学科暂无在读学生。`,
       });
       continue;
@@ -141,6 +155,19 @@ export async function runWeeklySummaryDept(prisma: PrismaClient): Promise<void> 
         ? `⚠ 有 ${noPlanCount} 名学生尚未制定规划，请督促班主任跟进。`
         : '所有学生均已设定规划。',
     ].join('\n');
+
+    const existingWeeklySummary = await prisma.notification.findFirst({
+      where: {
+        userId: headUserId,
+        type: 'weekly_summary_dept',
+        title,
+        createdAt: { gte: weekStart, lte: weekEnd },
+      },
+    });
+    if (existingWeeklySummary) {
+      console.log(`[weekly-summary-dept] 学科负责人 ${headUserName} 的 ${subjectName} 周报已发送，跳过`);
+      continue;
+    }
 
     // 发送周报通知
     await createInAppNotification(prisma, {
