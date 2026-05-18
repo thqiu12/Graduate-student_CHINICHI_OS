@@ -238,6 +238,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL])],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      const currentUser = request.user as JwtPayload;
       const parsed = createUserSchema.safeParse(request.body);
       if (!parsed.success) {
         throw new AppError(
@@ -293,6 +294,23 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
           },
         });
 
+        await tx.operationLog.create({
+          data: {
+            actorId: currentUser.sub,
+            actorName: currentUser.name,
+            actionType: 'user_create',
+            targetType: 'user',
+            targetId: user.id,
+            detail: {
+              userName: body.name,
+              phone: body.phone,
+              roleCode: body.roleCode,
+              campusId: body.campusId ?? null,
+              subjectId: body.subjectId ?? null,
+            } as any,
+          },
+        });
+
         return user;
       });
 
@@ -335,6 +353,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
       reply: FastifyReply,
     ) => {
       const { id } = request.params;
+      const currentUser = request.user as JwtPayload;
 
       const parsed = updateUserSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -431,6 +450,33 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
               subject: true,
             },
           },
+        },
+      });
+
+      const changedFields = [
+        body.name !== undefined ? 'name' : null,
+        body.phone !== undefined ? 'phone' : null,
+        body.password !== undefined ? 'password' : null,
+        body.isActive !== undefined ? 'isActive' : null,
+        body.roleCode !== undefined ? 'roleCode' : null,
+        body.campusId !== undefined ? 'campusId' : null,
+        body.subjectId !== undefined ? 'subjectId' : null,
+      ].filter((field): field is string => field !== null);
+
+      await fastify.prisma.operationLog.create({
+        data: {
+          actorId: currentUser.sub,
+          actorName: currentUser.name,
+          actionType: 'user_update',
+          targetType: 'user',
+          targetId: id,
+          detail: {
+            userName: updatedUser.name,
+            changedFields,
+            roleCode: body.roleCode,
+            campusId: body.campusId,
+            subjectId: body.subjectId,
+          } as any,
         },
       });
 
