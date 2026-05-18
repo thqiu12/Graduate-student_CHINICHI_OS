@@ -34,6 +34,8 @@ assertContains('backend/src/routes/students.ts', '/students/import');
 assertContains('backend/src/routes/files.ts', '/students/:id/files/:fileId/versions/:versionId/download');
 assertContains('backend/src/routes/files.ts', '/students/:id/files/:fileId');
 assertContains('frontend/src/pages/student/Files.tsx', 'FILE_TYPE_OPTIONS');
+assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', 'teacher-student-files');
+assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', '已上传文件');
 assertContains('backend/src/routes/plans.ts', 'PlanStatus.cancelled');
 assertContains('backend/src/routes/schools.ts', "node.nodeCode === 'inno'");
 assertContains('backend/src/routes/inno.ts', "nodeCode: 'inno'");

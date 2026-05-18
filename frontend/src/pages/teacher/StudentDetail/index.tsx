@@ -5,14 +5,15 @@ import React, { useState } from 'react';
 import {
   Tabs, Card, Descriptions, Tag, Button, Typography, Timeline,
   Form, Input, Select, DatePicker, Modal, Upload, message, Table,
-  Space, Popconfirm, Badge, Row, Col, Statistic, Divider, Empty, Spin, Checkbox,
+  Space, Popconfirm, Badge, Row, Col, Statistic, Divider, Empty, Spin, Checkbox, List,
 } from 'antd';
 import {
   PlusOutlined, UploadOutlined, DeleteOutlined, EyeOutlined,
-  FileTextOutlined, ExperimentOutlined, NotificationOutlined,
+  FileTextOutlined, ExperimentOutlined, NotificationOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useStudent } from '../../../api/students.api';
 import { useCoachingRecords, useAddCoachingRecord } from '../../../api/coaching.api';
 import { useTargetSchools, useAddSchool, useDeleteSchool, useUpdateSchoolNode } from '../../../api/schools.api';
@@ -20,7 +21,7 @@ import { usePushNotification } from '../../../api/notifications.api';
 import StagesTab from './StagesTab';
 import TasksTab from './TasksTab';
 import GanttTab from './GanttTab';
-import apiClient from '../../../api/client';
+import apiClient, { getErrorMessage } from '../../../api/client';
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
@@ -29,6 +30,28 @@ const RISK_TAG_LABELS: Record<string, string> = {
   pace_risk: '推进节奏风险', attitude_issue: '态度问题',
   inno_gap: '内诺差距', preparation_weak: '备考薄弱', exam_repeat: '重考生',
 };
+
+interface FileVersion {
+  id: string;
+  versionNo: number;
+  size: number;
+  createdAt: string;
+}
+
+interface StudentFile {
+  id: string;
+  fileName: string;
+  fileType: string;
+  description?: string;
+  createdAt: string;
+  uploader?: { name: string };
+  versions: FileVersion[];
+}
+
+interface FilesResponse {
+  data: Record<string, StudentFile[]>;
+  typeNames: Record<string, string>;
+}
 
 // ─── 辅导记录 Tab ─────────────────────────────────────────
 const CoachingTab: React.FC<{ studentId: string }> = ({ studentId }) => {
@@ -261,7 +284,16 @@ const SchoolsTab: React.FC<{ studentId: string }> = ({ studentId }) => {
 // ─── 文件管理 Tab ─────────────────────────────────────────
 const FilesTab: React.FC<{ studentId: string }> = ({ studentId }) => {
   const [messageApi, ctxHolder] = message.useMessage();
+  const queryClient = useQueryClient();
   const [uploading, setUploading] = useState(false);
+  const { data, isLoading } = useQuery<FilesResponse>({
+    queryKey: ['teacher-student-files', studentId],
+    queryFn: async () => {
+      const res = await apiClient.get(`/students/${studentId}/files`);
+      return res.data as FilesResponse;
+    },
+    enabled: !!studentId,
+  });
 
   const handleUpload = async (options: any, fileType: string) => {
     const { file, onSuccess, onError } = options;
@@ -275,12 +307,42 @@ const FilesTab: React.FC<{ studentId: string }> = ({ studentId }) => {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       messageApi.success('文件上传成功');
+      queryClient.invalidateQueries({ queryKey: ['teacher-student-files', studentId] });
       onSuccess('ok');
     } catch (_e) {
-      messageApi.error('上传失败');
+      messageApi.error(getErrorMessage(_e, '上传失败'));
       onError(_e);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleDownload = async (file: StudentFile, version: FileVersion) => {
+    try {
+      const res = await apiClient.get(
+        `/students/${studentId}/files/${file.id}/versions/${version.id}/download`,
+        { responseType: 'blob' },
+      );
+      const url = URL.createObjectURL(res.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = file.fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '下载失败，请稍后重试'));
+    }
+  };
+
+  const handleDelete = async (file: StudentFile) => {
+    try {
+      await apiClient.delete(`/students/${studentId}/files/${file.id}`);
+      messageApi.success('文件已删除');
+      queryClient.invalidateQueries({ queryKey: ['teacher-student-files', studentId] });
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '删除失败，请稍后重试'));
     }
   };
 
@@ -290,33 +352,97 @@ const FilesTab: React.FC<{ studentId: string }> = ({ studentId }) => {
     { key: 'certificate', label: '证明文件', icon: <FileTextOutlined />, color: '#fa8c16' },
     { key: 'other', label: '其他文件', icon: <FileTextOutlined />, color: '#9254de' },
   ];
+  const groups = data?.data ?? {};
+  const typeNames = data?.typeNames ?? {};
+  const fileGroups = Object.entries(groups).filter(([, files]) => files.length > 0);
 
   return (
     <>
       {ctxHolder}
-      <Row gutter={[16, 16]}>
-        {fileTypes.map(ft => (
-          <Col xs={24} sm={12} key={ft.key}>
-            <Card
-              size="small"
-              title={<><span style={{ color: ft.color }}>{ft.icon}</span> {ft.label}</>}
-              extra={
-                <Upload
-                  customRequest={(opts) => handleUpload(opts, ft.key)}
-                  showUploadList={false}
-                  accept=".pdf,.doc,.docx,.jpg,.png"
-                >
-                  <Button size="small" icon={<UploadOutlined />} loading={uploading}>上传</Button>
-                </Upload>
-              }
-            >
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {ft.key === 'research_plan' ? '📌 每次上传自动递增版本号' : '支持 PDF / Word / 图片'}
-              </Text>
-            </Card>
-          </Col>
-        ))}
-      </Row>
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Row gutter={[16, 16]}>
+          {fileTypes.map(ft => (
+            <Col xs={24} sm={12} key={ft.key}>
+              <Card
+                size="small"
+                title={<><span style={{ color: ft.color }}>{ft.icon}</span> {ft.label}</>}
+                extra={
+                  <Upload
+                    customRequest={(opts) => handleUpload(opts, ft.key)}
+                    showUploadList={false}
+                    accept=".pdf,.doc,.docx,.jpg,.png"
+                  >
+                    <Button size="small" icon={<UploadOutlined />} loading={uploading}>上传</Button>
+                  </Upload>
+                }
+              >
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {ft.key === 'research_plan' ? '📌 每次上传自动递增版本号' : '支持 PDF / Word / 图片'}
+                </Text>
+              </Card>
+            </Col>
+          ))}
+        </Row>
+
+        <Card size="small" title="已上传文件" loading={isLoading}>
+          {fileGroups.length === 0 ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无文件" />
+          ) : (
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              {fileGroups.map(([type, files]) => (
+                <div key={type}>
+                  <Tag color={type === 'research_plan' ? 'blue' : 'default'}>{typeNames[type] ?? type}</Tag>
+                  <List
+                    size="small"
+                    dataSource={files}
+                    renderItem={(file: StudentFile) => {
+                      const latestVersion = file.versions?.[0];
+                      return (
+                        <List.Item
+                          actions={[
+                            latestVersion ? (
+                              <Button
+                                key="download"
+                                size="small"
+                                icon={<DownloadOutlined />}
+                                onClick={() => handleDownload(file, latestVersion)}
+                              >
+                                下载
+                              </Button>
+                            ) : null,
+                            <Popconfirm
+                              key="delete"
+                              title="确定删除此文件？"
+                              description="删除后文件和版本记录都将移除。"
+                              onConfirm={() => handleDelete(file)}
+                              okText="删除"
+                              cancelText="取消"
+                            >
+                              <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+                            </Popconfirm>,
+                          ].filter(Boolean)}
+                        >
+                          <List.Item.Meta
+                            title={file.fileName}
+                            description={
+                              <Space size={8} wrap>
+                                <Text type="secondary">上传人：{file.uploader?.name ?? '-'}</Text>
+                                <Text type="secondary">版本：v{latestVersion?.versionNo ?? '-'}</Text>
+                                <Text type="secondary">{dayjs(file.createdAt).format('YYYY-MM-DD')}</Text>
+                                {file.description && <Text type="secondary">{file.description}</Text>}
+                              </Space>
+                            }
+                          />
+                        </List.Item>
+                      );
+                    }}
+                  />
+                </div>
+              ))}
+            </Space>
+          )}
+        </Card>
+      </Space>
     </>
   );
 };
