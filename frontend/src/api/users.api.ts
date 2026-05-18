@@ -174,3 +174,21 @@ export function useSubjects() {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+export function useImportStudents() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await apiClient.post('/students/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return res.data as { data: { imported: number }; message: string };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: userQueryKeys.all });
+      qc.invalidateQueries({ queryKey: ['students'] });
+    },
+  });
+}

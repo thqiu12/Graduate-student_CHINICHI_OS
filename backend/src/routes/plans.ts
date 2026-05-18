@@ -620,7 +620,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
             type: 'plan_rejected',
             title: '学生对规划提出异议',
             content: `学生对「${plan.stageName}」规划提出异议：${parsed.data.content}`,
-            relatedId: planId,
+            relatedId: studentId,
           },
         });
       }

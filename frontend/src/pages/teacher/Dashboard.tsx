@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router-dom';
 import { useStudents, useCreateStudent } from '../../api/students.api';
 import { useTeacherDashboardStats, type StageDistributionItem } from '../../api/stats.api';
 import { PERIOD_LABELS } from '../../types/plan';
+import { getErrorMessage } from '../../api/client';
 
 const { Text, Title } = Typography;
 
@@ -233,8 +234,8 @@ const TeacherDashboard: React.FC = () => {
       messageApi.success('学生创建成功');
       setNewStudentVisible(false);
       form.resetFields();
-    } catch (_e) {
-      messageApi.error('创建失败，请检查信息');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '创建失败，请检查信息'));
     }
   };
 

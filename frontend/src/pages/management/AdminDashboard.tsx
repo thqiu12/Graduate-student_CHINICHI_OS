@@ -12,7 +12,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useStatsOverview, useExamSeasonStats, useAlerts } from '../../api/stats.api';
-import apiClient from '../../api/client';
+import apiClient, { getErrorMessage } from '../../api/client';
 
 const { Title, Text } = Typography;
 
@@ -41,8 +41,8 @@ const AdminDashboard: React.FC = () => {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      messageApi.error('导出失败，请稍后重试');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '导出失败，请稍后重试'));
     }
   };
 

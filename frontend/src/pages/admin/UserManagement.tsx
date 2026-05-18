@@ -4,23 +4,25 @@
 import React, { useState } from 'react';
 import {
   Table, Button, Space, Tag, Input, Select, Modal, Form,
-  Popconfirm, message, Typography, Card, Row, Col,
+  Popconfirm, message, Typography, Card, Row, Col, Upload, Alert,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, StopOutlined, CheckOutlined,
-  SearchOutlined, UserAddOutlined,
+  SearchOutlined, UserAddOutlined, UploadOutlined,
 } from '@ant-design/icons';
 import {
   useUsers,
   useCreateUser,
   useUpdateUser,
   useSetUserActive,
+  useImportStudents,
   useCampuses,
   useSubjects,
   type UserItem,
   type CreateUserBody,
   type UpdateUserBody,
 } from '../../api/users.api';
+import { getErrorMessage } from '../../api/client';
 
 const { Title } = Typography;
 
@@ -62,6 +64,8 @@ const UserManagementPage: React.FC = () => {
   // Modal 状态
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importErrors, setImportErrors] = useState<Array<{ rowNumber: number; message: string }>>([]);
   const [editingUser, setEditingUser] = useState<UserItem | null>(null);
   const [createForm] = Form.useForm<CreateUserBody>();
   const [editForm] = Form.useForm<UpdateUserBody>();
@@ -79,6 +83,7 @@ const UserManagementPage: React.FC = () => {
   const createMutation = useCreateUser();
   const updateMutation = useUpdateUser();
   const setActiveMutation = useSetUserActive();
+  const importStudentsMutation = useImportStudents();
 
   // ─── 操作处理 ─────────────────────────────────────────
 
@@ -98,8 +103,8 @@ const UserManagementPage: React.FC = () => {
       messageApi.success('用户创建成功');
       setCreateModalOpen(false);
       createForm.resetFields();
-    } catch (_e) {
-      messageApi.error('创建失败，请重试');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '创建失败，请重试'));
     }
   };
 
@@ -114,8 +119,8 @@ const UserManagementPage: React.FC = () => {
       setEditModalOpen(false);
       setEditingUser(null);
       editForm.resetFields();
-    } catch (_e) {
-      messageApi.error('更新失败，请重试');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '更新失败，请重试'));
     }
   };
 
@@ -126,9 +131,23 @@ const UserManagementPage: React.FC = () => {
         isActive: user.status !== 'active',
       });
       messageApi.success(user.status === 'active' ? '用户已禁用' : '用户已启用');
-    } catch (_e) {
-      messageApi.error('操作失败，请重试');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '操作失败，请重试'));
     }
+  };
+
+  const handleImport = async (file: File) => {
+    setImportErrors([]);
+    try {
+      const result = await importStudentsMutation.mutateAsync(file);
+      messageApi.success(result.message ?? '导入成功');
+      setImportModalOpen(false);
+    } catch (e: unknown) {
+      const response = (e as { response?: { data?: { errors?: Array<{ rowNumber: number; message: string }> } } }).response;
+      setImportErrors(response?.data?.errors ?? []);
+      messageApi.error(getErrorMessage(e, '导入失败，请检查文件'));
+    }
+    return false;
   };
 
   const openEditModal = (user: UserItem) => {
@@ -311,13 +330,18 @@ const UserManagementPage: React.FC = () => {
             <UserAddOutlined style={{ marginRight: 8 }} />
             账号管理
           </Title>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setCreateModalOpen(true)}
-          >
-            新建用户
-          </Button>
+          <Space>
+            <Button icon={<UploadOutlined />} onClick={() => setImportModalOpen(true)}>
+              导入学生CSV
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setCreateModalOpen(true)}
+            >
+              新建用户
+            </Button>
+          </Space>
         </div>
 
         {/* 筛选栏 */}
@@ -424,6 +448,50 @@ const UserManagementPage: React.FC = () => {
           >
             {renderFormFields(true)}
           </Form>
+        </Modal>
+
+        <Modal
+          title="导入学生CSV"
+          open={importModalOpen}
+          onCancel={() => {
+            setImportModalOpen(false);
+            setImportErrors([]);
+          }}
+          footer={null}
+          destroyOnClose
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size={16}>
+            <Alert
+              type="info"
+              showIcon
+              message="CSV 表头需包含 name/姓名、phone/手机号、campusId/校区ID、subjectId/学科ID、teacherId/班主任ID、entryDate/入学日期"
+            />
+            <Upload.Dragger
+              accept=".csv,text/csv"
+              maxCount={1}
+              beforeUpload={(file) => handleImport(file)}
+              showUploadList={false}
+              disabled={importStudentsMutation.isPending}
+            >
+              <p className="ant-upload-drag-icon"><UploadOutlined /></p>
+              <p className="ant-upload-text">点击或拖拽 CSV 文件到此处上传</p>
+            </Upload.Dragger>
+            {importErrors.length > 0 && (
+              <Alert
+                type="error"
+                showIcon
+                message="导入数据存在错误"
+                description={
+                  <div>
+                    {importErrors.slice(0, 8).map((err) => (
+                      <div key={`${err.rowNumber}-${err.message}`}>第 {err.rowNumber} 行：{err.message}</div>
+                    ))}
+                    {importErrors.length > 8 && <div>还有 {importErrors.length - 8} 条错误未显示</div>}
+                  </div>
+                }
+              />
+            )}
+          </Space>
         </Modal>
       </div>
     </>

@@ -12,7 +12,7 @@ import {
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/auth.store';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import apiClient, { tokenStorage } from '../../api/client';
+import apiClient, { getErrorMessage, tokenStorage } from '../../api/client';
 import type { UploadFile } from 'antd';
 
 // UploadChangeInfo 结构
@@ -103,8 +103,8 @@ const FilesPage: React.FC = () => {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      messageApi.error('下载失败，请稍后重试');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '下载失败，请稍后重试'));
     }
   };
 

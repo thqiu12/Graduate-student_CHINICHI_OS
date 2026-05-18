@@ -25,6 +25,15 @@ export const tokenStorage = {
   },
 };
 
+export function getErrorMessage(error: unknown, fallback = '操作失败，请重试'): string {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { message?: string; error?: string } | undefined;
+    return data?.message ?? data?.error ?? error.message ?? fallback;
+  }
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
+
 // ─── 创建 Axios 实例 ──────────────────────────────────────
 const apiClient: AxiosInstance = axios.create({
   baseURL: BASE_URL,

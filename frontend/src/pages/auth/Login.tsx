@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import { Typography, message, Spin } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth.store';
-import apiClient from '../../api/client';
+import apiClient, { getErrorMessage } from '../../api/client';
 
 const { Title, Text } = Typography;
 
@@ -68,8 +68,8 @@ const LoginPage: React.FC = () => {
       else if (roles.includes('subject_head')) navigate('/subject-head', { replace: true });
       else if (roles.includes('teacher')) navigate('/teacher', { replace: true });
       else navigate('/student', { replace: true });
-    } catch {
-      messageApi.error(`进入失败，请稍后重试`);
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '进入失败，请稍后重试'));
     } finally {
       setLoading(null);
     }

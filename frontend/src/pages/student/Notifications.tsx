@@ -22,6 +22,9 @@ import {
   CheckCircleOutlined,
 } from '@ant-design/icons';
 import { useNotifications, useMarkRead, useMarkAllRead, NOTIFICATION_TYPE_LABELS, type Notification } from '../../api/notifications.api';
+import { useAuthStore } from '../../stores/auth.store';
+import { useNavigate } from 'react-router-dom';
+import { getErrorMessage } from '../../api/client';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
@@ -35,9 +38,9 @@ const { Text, Title } = Typography;
 
 const NotificationItem: React.FC<{
   notification: Notification;
-  onRead: (id: string) => void;
+  onOpen: (notification: Notification) => void;
   loading: boolean;
-}> = ({ notification, onRead, loading }) => {
+}> = ({ notification, onOpen, loading }) => {
   const typeLabel = NOTIFICATION_TYPE_LABELS[notification.type] ?? '🔔 通知';
   const timeAgo = dayjs(notification.createdAt).fromNow();
 
@@ -52,9 +55,7 @@ const NotificationItem: React.FC<{
         cursor: 'pointer',
         transition: 'all 0.2s',
       }}
-      onClick={() => {
-        if (!notification.isRead) onRead(notification.id);
-      }}
+      onClick={() => onOpen(notification)}
       extra={
         !notification.isRead && (
           <Button
@@ -64,7 +65,7 @@ const NotificationItem: React.FC<{
             loading={loading}
             onClick={(e) => {
               e.stopPropagation();
-              onRead(notification.id);
+              onOpen(notification);
             }}
           >
             标为已读
@@ -131,6 +132,8 @@ const NotificationSkeleton: React.FC = () => (
 // ─── 主组件 ───────────────────────────────────────────────
 
 const NotificationsPage: React.FC = () => {
+  const navigate = useNavigate();
+  const { isStudent } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
   const [messageApi, contextHolder] = message.useMessage();
 
@@ -146,8 +149,27 @@ const NotificationsPage: React.FC = () => {
   const handleMarkRead = async (id: string) => {
     try {
       await markReadMutation.mutateAsync(id);
-    } catch {
-      messageApi.error('操作失败，请重试');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '操作失败，请重试'));
+    }
+  };
+
+  const handleOpenNotification = async (notification: Notification) => {
+    if (!notification.isRead) {
+      await handleMarkRead(notification.id);
+    }
+    if (!notification.relatedId) return;
+
+    if (isStudent && (notification.type === 'plan_pending' || notification.type === 'plan_change_pending')) {
+      navigate(`/student/plan-confirm/${notification.relatedId}`);
+      return;
+    }
+    if (!isStudent && notification.type === 'teacher_push') {
+      navigate(`/teacher/students/${notification.relatedId}`);
+      return;
+    }
+    if (!isStudent && notification.type === 'plan_rejected') {
+      navigate(`/teacher/students/${notification.relatedId}`);
     }
   };
 
@@ -155,8 +177,8 @@ const NotificationsPage: React.FC = () => {
     try {
       const result = await markAllReadMutation.mutateAsync();
       messageApi.success(`已将 ${result.count} 条通知标为已读`);
-    } catch {
-      messageApi.error('操作失败，请重试');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '操作失败，请重试'));
     }
   };
 
@@ -239,7 +261,7 @@ const NotificationsPage: React.FC = () => {
             renderItem={(item) => (
               <NotificationItem
                 notification={item}
-                onRead={handleMarkRead}
+                onOpen={handleOpenNotification}
                 loading={markReadMutation.isPending && markReadMutation.variables === item.id}
               />
             )}

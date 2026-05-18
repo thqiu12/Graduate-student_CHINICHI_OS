@@ -34,7 +34,7 @@ import { useStudentPlans, useConfirmPlan, useRejectPlan, useToggleTask } from '.
 import { useAuthStore } from '../../stores/auth.store';
 import { TaskItem } from '../../components/TaskItem';
 import { PlanStatus, type PeriodPlan, PERIOD_LABELS, PLAN_STATUS_LABELS } from '../../types/plan';
-import apiClient from '../../api/client';
+import apiClient, { getErrorMessage } from '../../api/client';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -416,8 +416,8 @@ const PlanConfirmPage: React.FC = () => {
       await confirmMutation.mutateAsync(planId);
       messageApi.success('规划已确认！开始执行');
       navigate('/student');
-    } catch (_err) {
-      messageApi.error('确认失败，请重试');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '确认失败，请重试'));
     }
   };
 
@@ -429,8 +429,8 @@ const PlanConfirmPage: React.FC = () => {
       messageApi.success('异议已提交，班主任将与你重新协商');
       setRejectModalOpen(false);
       navigate('/student');
-    } catch (_err) {
-      messageApi.error('提交失败，请重试');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '提交失败，请重试'));
     }
   };
 
