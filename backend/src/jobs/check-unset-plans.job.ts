@@ -5,6 +5,7 @@
 import { Worker, Job } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import { createRedisConnection } from './queue';
+import { createInAppNotification } from '../utils/notifications';
 
 const DAYS_THRESHOLD = 7; // 入塾超过7天未设定规划触发告警
 
@@ -124,14 +125,12 @@ export async function runCheckUnsetPlans(prisma: PrismaClient): Promise<void> {
         ? `[提醒] 学生 ${student.user.name} 入塾 ${entryDays} 天未设定规划`
         : `[告警] ${student.user.name} 入塾 ${entryDays} 天未设定规划`;
 
-      await prisma.notification.create({
-        data: {
-          userId: recipientId,
-          type: 'alert_no_plan',
-          title,
-          content: alertContent,
-          relatedId: student.id,
-        },
+      await createInAppNotification(prisma, {
+        userId: recipientId,
+        type: 'alert_no_plan',
+        title,
+        content: alertContent,
+        relatedId: student.id,
       });
 
       notifiedCount++;

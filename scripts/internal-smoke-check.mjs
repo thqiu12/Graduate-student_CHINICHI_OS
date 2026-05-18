@@ -47,6 +47,12 @@ assertContains('backend/src/routes/risk-tags.ts', "targetType: 'student_risk_tag
 assertContains('frontend/src/api/coaching.api.ts', 'planQueryKeys.all(studentId)');
 assertContains('frontend/src/pages/teacher/StudentDetail/StagesTab.tsx', 'getErrorMessage');
 assertContains('frontend/src/pages/teacher/StudentDetail/TasksTab.tsx', 'getErrorMessage');
+assertContains('backend/src/utils/notifications.ts', 'notificationDelivery.create');
+assertContains('backend/src/jobs/check-overdue-tasks.job.ts', 'createInAppNotification');
+assertContains('backend/src/jobs/check-unconfirmed-plans.job.ts', 'createInAppNotification');
+assertContains('backend/src/jobs/check-unset-plans.job.ts', 'createInAppNotification');
+assertContains('backend/src/jobs/weekly-summary-teacher.job.ts', 'createInAppNotification');
+assertContains('backend/src/jobs/weekly-summary-dept.job.ts', 'createInAppNotification');
 assertContains('backend/src/routes/schools.ts', "node.nodeCode === 'inno'");
 assertContains('backend/src/routes/schools.ts', 'removedInnoTracking');
 assertContains('backend/src/routes/schools.ts', "targetType: 'target_school'");

@@ -6,6 +6,7 @@
 import { Worker, Job } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import { createRedisConnection } from './queue';
+import { createInAppNotification } from '../utils/notifications';
 
 /**
  * 执行「逾期任务」检查的核心逻辑
@@ -86,14 +87,12 @@ export async function runCheckOverdueTasks(prisma: PrismaClient): Promise<void> 
     });
 
     if (!existingStudentNotif) {
-      await prisma.notification.create({
-        data: {
-          userId: studentUser.id,
-          type: 'task_overdue',
-          title: `[逾期提醒] 任务「${task.title}」已逾期`,
-          content: `您的任务「${task.title}」截止日为 ${dueDateStr}，已逾期未完成，请尽快处理。`,
-          relatedId: task.id,
-        },
+      await createInAppNotification(prisma, {
+        userId: studentUser.id,
+        type: 'task_overdue',
+        title: `[逾期提醒] 任务「${task.title}」已逾期`,
+        content: `您的任务「${task.title}」截止日为 ${dueDateStr}，已逾期未完成，请尽快处理。`,
+        relatedId: task.id,
       });
       notifiedCount++;
     }
@@ -110,14 +109,12 @@ export async function runCheckOverdueTasks(prisma: PrismaClient): Promise<void> 
       });
 
       if (!existingTeacherNotif) {
-        await prisma.notification.create({
-          data: {
-            userId: currentTeacher.id,
-            type: 'task_overdue_teacher',
-            title: `[逾期提醒] 学生 ${studentUser.name} 的任务已逾期`,
-            content: `学生 ${studentUser.name} 的任务「${task.title}」截止日为 ${dueDateStr}，已逾期未完成，请督促学生尽快完成。`,
-            relatedId: task.id,
-          },
+        await createInAppNotification(prisma, {
+          userId: currentTeacher.id,
+          type: 'task_overdue_teacher',
+          title: `[逾期提醒] 学生 ${studentUser.name} 的任务已逾期`,
+          content: `学生 ${studentUser.name} 的任务「${task.title}」截止日为 ${dueDateStr}，已逾期未完成，请督促学生尽快完成。`,
+          relatedId: task.id,
         });
         notifiedCount++;
       }

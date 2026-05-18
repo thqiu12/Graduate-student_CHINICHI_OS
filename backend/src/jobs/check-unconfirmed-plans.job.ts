@@ -8,6 +8,7 @@
 import { Worker, Job } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import { createRedisConnection } from './queue';
+import { createInAppNotification } from '../utils/notifications';
 
 // 各阶段时间阈值（毫秒）
 const HOURS_24 = 24 * 60 * 60 * 1000;
@@ -81,14 +82,12 @@ export async function runCheckUnconfirmedPlans(prisma: PrismaClient): Promise<vo
       });
 
       if (!existingStudentNotif) {
-        await prisma.notification.create({
-          data: {
-            userId: studentUser.id,
-            type: 'plan_unconfirmed_student',
-            title: `[提醒] 您有一份规划待确认（已超过 ${unconfirmedHours} 小时）`,
-            content: `您的「${plan.stageName}」阶段规划已发送 ${unconfirmedHours} 小时，请尽快查看并确认。`,
-            relatedId: plan.id,
-          },
+        await createInAppNotification(prisma, {
+          userId: studentUser.id,
+          type: 'plan_unconfirmed_student',
+          title: `[提醒] 您有一份规划待确认（已超过 ${unconfirmedHours} 小时）`,
+          content: `您的「${plan.stageName}」阶段规划已发送 ${unconfirmedHours} 小时，请尽快查看并确认。`,
+          relatedId: plan.id,
         });
         console.log(
           `[check-unconfirmed-plans] 已通知学生 ${studentUser.name}（规划ID: ${plan.id}，超时${unconfirmedHours}h）`,
@@ -108,14 +107,12 @@ export async function runCheckUnconfirmedPlans(prisma: PrismaClient): Promise<vo
       });
 
       if (!existingTeacherNotif) {
-        await prisma.notification.create({
-          data: {
-            userId: currentTeacher.id,
-            type: 'plan_unconfirmed_teacher',
-            title: `[提醒] 学生 ${studentUser.name} 的规划已 ${unconfirmedDays} 天未确认`,
-            content: `学生 ${studentUser.name} 的「${plan.stageName}」阶段规划已发送 ${unconfirmedDays} 天，学生尚未确认。请联系学生尽快处理。`,
-            relatedId: plan.id,
-          },
+        await createInAppNotification(prisma, {
+          userId: currentTeacher.id,
+          type: 'plan_unconfirmed_teacher',
+          title: `[提醒] 学生 ${studentUser.name} 的规划已 ${unconfirmedDays} 天未确认`,
+          content: `学生 ${studentUser.name} 的「${plan.stageName}」阶段规划已发送 ${unconfirmedDays} 天，学生尚未确认。请联系学生尽快处理。`,
+          relatedId: plan.id,
         });
         console.log(
           `[check-unconfirmed-plans] 已通知班主任 ${currentTeacher.name}（规划ID: ${plan.id}，超时${unconfirmedDays}天）`,
@@ -144,14 +141,12 @@ export async function runCheckUnconfirmedPlans(prisma: PrismaClient): Promise<vo
         });
 
         if (!existingHeadNotif) {
-          await prisma.notification.create({
-            data: {
-              userId: head.userId,
-              type: 'plan_unconfirmed_dept',
-              title: `[升级告警] 学生 ${studentUser.name} 的规划已 ${unconfirmedDays} 天未确认`,
-              content: `学生 ${studentUser.name} 的「${plan.stageName}」阶段规划已发送 ${unconfirmedDays} 天仍未确认，班主任催促无效。请您介入处理。`,
-              relatedId: plan.id,
-            },
+          await createInAppNotification(prisma, {
+            userId: head.userId,
+            type: 'plan_unconfirmed_dept',
+            title: `[升级告警] 学生 ${studentUser.name} 的规划已 ${unconfirmedDays} 天未确认`,
+            content: `学生 ${studentUser.name} 的「${plan.stageName}」阶段规划已发送 ${unconfirmedDays} 天仍未确认，班主任催促无效。请您介入处理。`,
+            relatedId: plan.id,
           });
           console.log(
             `[check-unconfirmed-plans] 已通知学科负责人 ${head.user.name}（规划ID: ${plan.id}，超时${unconfirmedDays}天）`,

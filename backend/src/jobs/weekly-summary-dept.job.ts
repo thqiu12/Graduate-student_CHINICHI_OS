@@ -11,6 +11,7 @@
 import { Worker, Job } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import { createRedisConnection } from './queue';
+import { createInAppNotification } from '../utils/notifications';
 
 /**
  * 执行「学科负责人周报」的核心逻辑
@@ -67,13 +68,11 @@ export async function runWeeklySummaryDept(prisma: PrismaClient): Promise<void> 
 
     if (totalStudentCount === 0) {
       // 学科下没有学生，发简短通知
-      await prisma.notification.create({
-        data: {
-          userId: headUserId,
-          type: 'weekly_summary_dept',
-          title: `[周报] ${subjectName} 学科周报`,
-          content: `本周「${subjectName}」学科暂无在读学生。`,
-        },
+      await createInAppNotification(prisma, {
+        userId: headUserId,
+        type: 'weekly_summary_dept',
+        title: `[周报] ${subjectName} 学科周报`,
+        content: `本周「${subjectName}」学科暂无在读学生。`,
       });
       continue;
     }
@@ -144,13 +143,11 @@ export async function runWeeklySummaryDept(prisma: PrismaClient): Promise<void> 
     ].join('\n');
 
     // 发送周报通知
-    await prisma.notification.create({
-      data: {
-        userId: headUserId,
-        type: 'weekly_summary_dept',
-        title,
-        content,
-      },
+    await createInAppNotification(prisma, {
+      userId: headUserId,
+      type: 'weekly_summary_dept',
+      title,
+      content,
     });
 
     console.log(

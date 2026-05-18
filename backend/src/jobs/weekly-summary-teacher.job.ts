@@ -9,6 +9,7 @@
 import { Worker, Job } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import { createRedisConnection } from './queue';
+import { createInAppNotification } from '../utils/notifications';
 
 /**
  * 执行「班主任周报」的核心逻辑
@@ -115,13 +116,11 @@ export async function runWeeklySummaryTeacher(prisma: PrismaClient): Promise<voi
     ].join('\n');
 
     // 发送周报通知
-    await prisma.notification.create({
-      data: {
-        userId: teacherId,
-        type: 'weekly_summary_teacher',
-        title,
-        content,
-      },
+    await createInAppNotification(prisma, {
+      userId: teacherId,
+      type: 'weekly_summary_teacher',
+      title,
+      content,
     });
 
     console.log(
