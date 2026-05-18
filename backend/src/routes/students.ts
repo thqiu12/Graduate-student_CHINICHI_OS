@@ -35,6 +35,7 @@ const listQuerySchema = z.object({
   teacherId: z.string().optional(),
   status: z.string().optional(),
   riskTagCode: z.string().optional(),
+  targetSeason: z.string().optional(),
   search: z.string().optional(),
   page: z.string().optional().transform(Number).default('1'),
   pageSize: z.string().optional().transform(Number).default('20'),
@@ -117,6 +118,43 @@ function mapImportRows(csvText: string): ImportStudentRow[] {
   }));
 }
 
+async function assertCanUseSubject(
+  fastify: FastifyInstance,
+  user: JwtPayload,
+  subjectId: number,
+): Promise<void> {
+  if (user.roles.includes(Roles.ADMIN_TOTAL)) return;
+  if (user.roles.includes(Roles.SUBJECT_HEAD)) {
+    const role = await fastify.prisma.userRole.findFirst({
+      where: {
+        userId: user.sub,
+        subjectId,
+        role: { code: Roles.SUBJECT_HEAD },
+      },
+    });
+    if (role) return;
+  }
+  if (user.roles.includes(Roles.TEACHER)) return;
+  throw createError.forbidden('无权创建或修改该学科学生');
+}
+
+async function assertTeacherUser(
+  fastify: FastifyInstance,
+  teacherId: string,
+): Promise<void> {
+  const teacher = await fastify.prisma.user.findFirst({
+    where: {
+      id: teacherId,
+      isActive: true,
+      userRoles: { some: { role: { code: Roles.TEACHER } } },
+    },
+    select: { id: true },
+  });
+  if (!teacher) {
+    throw new AppError(ErrorCode.VALIDATION_ERROR, '班主任不存在或不是有效班主任账号');
+  }
+}
+
 // ─── 路由注册函数 ─────────────────────────────────────────
 export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
   // GET /api/students - 学生列表（支持筛选）
@@ -160,6 +198,9 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
           },
         };
       }
+      if (query.targetSeason) {
+        whereClause['targetSeason'] = query.targetSeason;
+      }
       if (query.search) {
         whereClause['user'] = {
           name: { contains: query.search, mode: 'insensitive' },
@@ -187,9 +228,9 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
               include: { tag: true },
             },
             periodPlans: {
-              where: { status: 'active' },
-              take: 1,
-              orderBy: { createdAt: 'desc' },
+              where: { status: { in: ['pending', 'change_pending', 'active'] } },
+              take: 3,
+              orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
             },
           },
           skip: (page - 1) * pageSize,
@@ -376,10 +417,18 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
       }
       const body = parsed.data;
       const user = request.user as JwtPayload;
-      const teacherId = body.teacherId ?? (user.roles.includes(Roles.TEACHER) ? user.sub : null);
+      await assertCanUseSubject(fastify, user, body.subjectId);
+
+      const isOnlyTeacher = user.roles.includes(Roles.TEACHER) &&
+        !user.roles.includes(Roles.SUBJECT_HEAD) &&
+        !user.roles.includes(Roles.ADMIN_TOTAL);
+      const teacherId = isOnlyTeacher
+        ? user.sub
+        : body.teacherId ?? (user.roles.includes(Roles.TEACHER) ? user.sub : null);
       if (!teacherId) {
         throw new AppError(ErrorCode.VALIDATION_ERROR, '请选择班主任');
       }
+      await assertTeacherUser(fastify, teacherId);
 
       // 检查手机号是否已存在
       const existingUser = await fastify.prisma.user.findUnique({
@@ -470,6 +519,9 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
         throw createError.studentNotFound(id);
       }
       await assertStudentAccess(fastify, request.user as JwtPayload, id);
+      if (body.subjectId !== undefined) {
+        await assertCanUseSubject(fastify, request.user as JwtPayload, body.subjectId);
+      }
 
       const updated = await fastify.prisma.student.update({
         where: { id },

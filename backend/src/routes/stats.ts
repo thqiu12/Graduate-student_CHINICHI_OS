@@ -280,12 +280,12 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
         select: {
           id: true,
           periodPlans: {
-            orderBy: { version: 'desc' },
+            where: { status: 'active' },
+            orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
             take: 1,
             select: {
               periodCode: true,
               stageName: true,
-              status: true,
             },
           },
           targetSchools: {
@@ -307,14 +307,14 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
       let noActivePlan = 0;
 
       for (const s of students) {
-        const latest = s.periodPlans[0];
-        if (!latest || latest.status !== 'active') {
+        const activePlan = s.periodPlans[0];
+        if (!activePlan) {
           noActivePlan++;
           continue;
         }
-        const key = latest.periodCode;
+        const key = activePlan.periodCode;
         if (!stageMap[key]) {
-          stageMap[key] = { code: key, stageName: latest.stageName, count: 0 };
+          stageMap[key] = { code: key, stageName: activePlan.stageName, count: 0 };
         }
         stageMap[key].count++;
       }

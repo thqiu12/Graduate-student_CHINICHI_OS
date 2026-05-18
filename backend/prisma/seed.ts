@@ -77,13 +77,14 @@ async function main(): Promise<void> {
     });
   }
   const roles = await prisma.role.findMany({
-    where: { code: { in: ['admin_total', 'teacher', 'student'] } },
+    where: { code: { in: ['admin_total', 'subject_head', 'teacher', 'student'] } },
   });
   const roleIdByCode = new Map(roles.map((role) => [role.code, role.id]));
   const adminRoleId = roleIdByCode.get('admin_total');
+  const subjectHeadRoleId = roleIdByCode.get('subject_head');
   const teacherRoleId = roleIdByCode.get('teacher');
   const studentRoleId = roleIdByCode.get('student');
-  if (!adminRoleId || !teacherRoleId || !studentRoleId) {
+  if (!adminRoleId || !subjectHeadRoleId || !teacherRoleId || !studentRoleId) {
     throw new Error('核心角色初始化失败');
   }
   console.log('角色创建完成，共', roleData.length, '个角色');
@@ -113,6 +114,7 @@ async function main(): Promise<void> {
   // ═══════════════════════════════════════
   const adminPassword = 'Admin@123456';
   const adminPasswordHash = await bcrypt.hash(adminPassword, 10);
+  const demoPasswordHash = await bcrypt.hash('chinichi2026', 10);
 
   const firstAdmin = await prisma.user.upsert({
     where: { phone: '13800138000' },
@@ -149,13 +151,14 @@ async function main(): Promise<void> {
   // 测试管理员
   const adminUser = await prisma.user.upsert({
     where: { phone: '13900000001' },
-    update: {},
+    update: { passwordHash: demoPasswordHash },
     create: {
       id: '00000000-0000-0000-0000-000000000001',
       name: '测试管理员',
       phone: '13900000001',
       email: 'admin@chinichi.jp',
       isActive: true,
+      passwordHash: demoPasswordHash,
     },
   });
 
@@ -173,16 +176,48 @@ async function main(): Promise<void> {
     },
   });
 
+  // 测试学科负责人
+  const subjectHeadUser = await prisma.user.upsert({
+    where: { phone: '13900000004' },
+    update: { passwordHash: demoPasswordHash },
+    create: {
+      id: '00000000-0000-0000-0000-000000000004',
+      name: '测试学科负责人',
+      phone: '13900000004',
+      email: 'subject-head@chinichi.jp',
+      isActive: true,
+      passwordHash: demoPasswordHash,
+    },
+  });
+
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: subjectHeadUser.id,
+        roleId: subjectHeadRoleId,
+      },
+    },
+    update: {
+      subjectId: 1,
+    },
+    create: {
+      userId: subjectHeadUser.id,
+      roleId: subjectHeadRoleId,
+      subjectId: 1,
+    },
+  });
+
   // 测试班主任
   const teacherUser = await prisma.user.upsert({
     where: { phone: '13900000002' },
-    update: {},
+    update: { passwordHash: demoPasswordHash },
     create: {
       id: '00000000-0000-0000-0000-000000000002',
       name: '测试班主任',
       phone: '13900000002',
       email: 'teacher@chinichi.jp',
       isActive: true,
+      passwordHash: demoPasswordHash,
     },
   });
 
@@ -204,13 +239,14 @@ async function main(): Promise<void> {
   // 测试学生（先创建user，再创建student档案）
   const studentUser = await prisma.user.upsert({
     where: { phone: '13900000003' },
-    update: {},
+    update: { passwordHash: demoPasswordHash },
     create: {
       id: '00000000-0000-0000-0000-000000000003',
       name: '测试学生',
       phone: '13900000003',
       email: 'student@chinichi.jp',
       isActive: true,
+      passwordHash: demoPasswordHash,
     },
   });
 
@@ -266,15 +302,128 @@ async function main(): Promise<void> {
     });
   }
 
+  // 已有执行中规划的演示学生
+  const activeStudentUser = await prisma.user.upsert({
+    where: { phone: '13812345678' },
+    update: { passwordHash: demoPasswordHash },
+    create: {
+      id: '00000000-0000-0000-0000-000000000078',
+      name: '张思远',
+      phone: '13812345678',
+      email: 'zhang.siyuan@chinichi.jp',
+      isActive: true,
+      passwordHash: demoPasswordHash,
+    },
+  });
+
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: activeStudentUser.id,
+        roleId: studentRoleId,
+      },
+    },
+    update: {},
+    create: {
+      userId: activeStudentUser.id,
+      roleId: studentRoleId,
+    },
+  });
+
+  const activeStudent = await prisma.student.upsert({
+    where: { userId: activeStudentUser.id },
+    update: {},
+    create: {
+      id: '00000000-0000-0000-0001-000000000078',
+      userId: activeStudentUser.id,
+      campusId: 1,
+      subjectId: 1,
+      entryDate: new Date('2026-04-01'),
+      targetYear: '2027年春入学',
+      targetSeason: 'summer',
+      jlptLevel: 'N1',
+      jlptScore: 142,
+      undergradMajor: '社会学',
+      undergradGpa: 3.4,
+      notes: '演示学生：已有执行中规划',
+    },
+  });
+
+  const existingActiveRelation = await prisma.studentTeacher.findFirst({
+    where: {
+      studentId: activeStudent.id,
+      teacherId: teacherUser.id,
+      endedAt: null,
+    },
+  });
+
+  if (!existingActiveRelation) {
+    await prisma.studentTeacher.create({
+      data: {
+        studentId: activeStudent.id,
+        teacherId: teacherUser.id,
+        startedAt: new Date(),
+      },
+    });
+  }
+
+  await prisma.periodPlan.upsert({
+    where: {
+      studentId_periodCode_version: {
+        studentId: activeStudent.id,
+        periodCode: 'P1',
+        version: 1,
+      },
+    },
+    update: {
+      status: 'active',
+      confirmedAt: new Date('2026-04-05'),
+      confirmedBy: activeStudentUser.id,
+    },
+    create: {
+      studentId: activeStudent.id,
+      periodCode: 'P1',
+      stageName: '研究方向确定',
+      goal: '完成研究方向梳理并确定第一版研究计划主题',
+      startDate: new Date('2026-04-01'),
+      endDate: new Date('2026-05-31'),
+      version: 1,
+      status: 'active',
+      createdBy: teacherUser.id,
+      sentAt: new Date('2026-04-03'),
+      confirmedAt: new Date('2026-04-05'),
+      confirmedBy: activeStudentUser.id,
+      tasks: {
+        create: [
+          {
+            title: '整理研究兴趣关键词',
+            dueDate: new Date('2026-05-20'),
+            priority: '中',
+            sortOrder: 1,
+          },
+          {
+            title: '提交研究计划初版提纲',
+            dueDate: new Date('2026-05-27'),
+            priority: '高',
+            sortOrder: 2,
+          },
+        ],
+      },
+    },
+  });
+
   console.log('测试用户创建完成:');
   console.log('  - 管理员:', adminUser.name, '/', adminUser.phone);
+  console.log('  - 学科负责人:', subjectHeadUser.name, '/', subjectHeadUser.phone);
   console.log('  - 班主任:', teacherUser.name, '/', teacherUser.phone);
   console.log('  - 学生:', studentUser.name, '/', studentUser.phone);
+  console.log('  - 执行中规划学生:', activeStudentUser.name, '/', activeStudentUser.phone);
 
   console.log('\n种子数据插入完成！');
   console.log('\n管理员登录信息：');
   console.log('  手机号: 13800138000');
   console.log('  密码: Admin@123456');
+  console.log('\n演示账号密码：chinichi2026');
 }
 
 main()

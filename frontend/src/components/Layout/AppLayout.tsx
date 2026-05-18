@@ -22,9 +22,9 @@ const AppLayout: React.FC = () => {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
 
-  // 未读通知数（仅学生端底部导航显示）
+  // 未读通知数
   const { data: notifData } = useNotifications(isStudent ? false : undefined);
-  const unreadCount = isStudent ? (notifData?.unreadCount ?? 0) : 0;
+  const unreadCount = notifData?.unreadCount ?? 0;
 
   const handleLogout = () => {
     logout();
@@ -59,7 +59,7 @@ const AppLayout: React.FC = () => {
         { key: '/admin', icon: <BarChartOutlined />, label: '全局看板' },
         { key: '/teacher/students', icon: <TeamOutlined />, label: '全部学生' },
         { key: '/admin/calendar', icon: <CalendarOutlined />, label: '日历' },
-        { key: '/admin/notifications', icon: <BellOutlined />, label: '通知管理' },
+        { key: '/notifications', icon: <BellOutlined />, label: '通知消息' },
         { key: '/admin/users', icon: <UserAddOutlined />, label: '账号管理' },
       );
     }
@@ -167,8 +167,8 @@ const AppLayout: React.FC = () => {
             onClick={() => setCollapsed(!collapsed)}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <Badge count={3} size="small">
-              <BellOutlined style={{ fontSize: 18, cursor: 'pointer' }} onClick={() => navigate('/admin/notifications')} />
+            <Badge count={unreadCount} size="small">
+              <BellOutlined style={{ fontSize: 18, cursor: 'pointer' }} onClick={() => navigate('/notifications')} />
             </Badge>
             <Dropdown menu={userMenu} trigger={['click']}>
               <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
