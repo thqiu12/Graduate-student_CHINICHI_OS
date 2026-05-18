@@ -54,6 +54,7 @@ import {
   PLAN_STATUS_COLORS,
 } from '../../../types/plan';
 import type { Dayjs } from 'dayjs';
+import { getErrorMessage } from '../../../api/client';
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -302,8 +303,8 @@ const StagesTab: React.FC<StagesTabProps> = ({ studentId, studentName }) => {
     try {
       await sendPlanMutation.mutateAsync(planId);
       messageApi.success('规划已发送给学生确认');
-    } catch (_err) {
-      messageApi.error('发送失败，请重试');
+    } catch (err) {
+      messageApi.error(getErrorMessage(err, '发送失败，请重试'));
     }
   };
 
@@ -325,8 +326,8 @@ const StagesTab: React.FC<StagesTabProps> = ({ studentId, studentName }) => {
       messageApi.success('变更已发起，等待学生确认');
       setChangeModalOpen(false);
       changeForm.resetFields();
-    } catch (_err) {
-      messageApi.error('发起变更失败，请重试');
+    } catch (err) {
+      messageApi.error(getErrorMessage(err, '发起变更失败，请重试'));
     }
   };
 
@@ -343,8 +344,8 @@ const StagesTab: React.FC<StagesTabProps> = ({ studentId, studentName }) => {
       messageApi.success('规划草稿已创建');
       setCreateModalOpen(false);
       createForm.resetFields();
-    } catch (_err) {
-      messageApi.error('创建失败，请重试');
+    } catch (err) {
+      messageApi.error(getErrorMessage(err, '创建失败，请重试'));
     }
   };
 
@@ -352,8 +353,8 @@ const StagesTab: React.FC<StagesTabProps> = ({ studentId, studentName }) => {
     try {
       await completePlanMutation.mutateAsync(planId);
       messageApi.success('阶段规划已完成');
-    } catch (_err) {
-      messageApi.error('完成失败，请重试');
+    } catch (err) {
+      messageApi.error(getErrorMessage(err, '完成失败，请重试'));
     }
   };
 

@@ -45,6 +45,8 @@ assertContains('frontend/src/api/plans.api.ts', 'planQueryKeys.logs(studentId)')
 assertContains('backend/src/routes/coaching.ts', "targetType: 'coaching_record'");
 assertContains('backend/src/routes/risk-tags.ts', "targetType: 'student_risk_tag'");
 assertContains('frontend/src/api/coaching.api.ts', 'planQueryKeys.all(studentId)');
+assertContains('frontend/src/pages/teacher/StudentDetail/StagesTab.tsx', 'getErrorMessage');
+assertContains('frontend/src/pages/teacher/StudentDetail/TasksTab.tsx', 'getErrorMessage');
 assertContains('backend/src/routes/schools.ts', "node.nodeCode === 'inno'");
 assertContains('backend/src/routes/schools.ts', 'removedInnoTracking');
 assertContains('backend/src/routes/schools.ts', "targetType: 'target_school'");

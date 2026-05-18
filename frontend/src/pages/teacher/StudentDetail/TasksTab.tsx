@@ -33,7 +33,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useStudentPlans } from '../../../api/plans.api';
-import apiClient from '../../../api/client';
+import apiClient, { getErrorMessage } from '../../../api/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { planQueryKeys } from '../../../api/plans.api';
 import { PlanStatus, TaskStatus, TaskPriority, type PlanTask, type PeriodPlan } from '../../../types/plan';
@@ -178,8 +178,8 @@ const TasksTab: React.FC<{ studentId: string }> = ({ studentId }) => {
       await deleteTask(studentId, taskId);
       queryClient.invalidateQueries({ queryKey: planQueryKeys.all(studentId) });
       messageApi.success('任务已删除');
-    } catch {
-      messageApi.error('删除失败，请重试');
+    } catch (err) {
+      messageApi.error(getErrorMessage(err, '删除失败，请重试'));
     } finally {
       setDeletingId(null);
     }

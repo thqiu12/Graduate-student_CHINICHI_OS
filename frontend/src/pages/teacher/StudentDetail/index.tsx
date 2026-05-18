@@ -72,8 +72,8 @@ const CoachingTab: React.FC<{ studentId: string }> = ({ studentId }) => {
       messageApi.success('辅导记录已添加');
       setVisible(false);
       form.resetFields();
-    } catch (_e) {
-      messageApi.error('添加失败');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '添加失败'));
     }
   };
 
@@ -165,8 +165,8 @@ const SchoolsTab: React.FC<{ studentId: string }> = ({ studentId }) => {
       messageApi.success('志望校已添加');
       setVisible(false);
       form.resetFields();
-    } catch (_e) {
-      messageApi.error('添加失败');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '添加失败'));
     }
   };
 
@@ -525,8 +525,8 @@ const StudentDetail: React.FC = () => {
       messageApi.success('消息已推送');
       setPushModalOpen(false);
       pushForm.resetFields();
-    } catch (_e) {
-      messageApi.error('推送失败，请重试');
+    } catch (e) {
+      messageApi.error(getErrorMessage(e, '推送失败，请重试'));
     }
   };
 
