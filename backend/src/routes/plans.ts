@@ -11,6 +11,7 @@ import { AppError, createError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
 import { PlanStatus, Prisma } from '@prisma/client';
 import { assertStudentAccess } from '../utils/access-control';
+import { createInAppNotification } from '../utils/notifications';
 
 // ─── 请求体 Schema ───────────────────────────────────────
 const createPlanSchema = z.object({
@@ -92,36 +93,6 @@ async function writeOperationLog(
       targetType: options.targetType,
       targetId: options.targetId,
       detail: (options.detail ?? {}) as any,
-    },
-  });
-}
-
-async function createInAppNotification(
-  fastify: FastifyInstance,
-  data: {
-    userId: string;
-    type: string;
-    title: string;
-    content?: string | null;
-    relatedId?: string | null;
-  },
-): Promise<void> {
-  const notification = await fastify.prisma.notification.create({
-    data: {
-      userId: data.userId,
-      type: data.type,
-      title: data.title,
-      content: data.content ?? null,
-      relatedId: data.relatedId ?? null,
-    },
-  });
-
-  await fastify.prisma.notificationDelivery.create({
-    data: {
-      notificationId: notification.id,
-      channel: 'in_app',
-      status: 'sent',
-      sentAt: new Date(),
     },
   });
 }
@@ -253,7 +224,7 @@ async function createTaskChangePlan(
   });
 
   if (studentRecord) {
-    await createInAppNotification(fastify, {
+    await createInAppNotification(fastify.prisma, {
       userId: studentRecord.userId,
       type: 'plan_change_pending',
       title: '规划任务已更新，需要重新确认',
@@ -459,7 +430,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       if (studentUser) {
-        await createInAppNotification(fastify, {
+        await createInAppNotification(fastify.prisma, {
           userId: studentUser.userId,
           type: 'plan_pending',
           title: '新阶段规划待确认',
@@ -645,7 +616,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       if (teacherRelation) {
-        await createInAppNotification(fastify, {
+        await createInAppNotification(fastify.prisma, {
           userId: teacherRelation.teacherId,
           type: 'plan_rejected',
           title: '学生对规划提出异议',
@@ -745,7 +716,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       if (studentRecord) {
-        await createInAppNotification(fastify, {
+        await createInAppNotification(fastify.prisma, {
           userId: studentRecord.userId,
           type: 'plan_change_pending',
           title: '规划已更新，需要重新确认',

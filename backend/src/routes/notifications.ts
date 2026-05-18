@@ -9,6 +9,7 @@ import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, createError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
 import { assertStudentAccess } from '../utils/access-control';
+import { createInAppNotification } from '../utils/notifications';
 
 // ─── 请求参数 Schema ─────────────────────────────────────
 const listQuerySchema = z.object({
@@ -183,24 +184,12 @@ export async function notificationRoutes(fastify: FastifyInstance): Promise<void
         throw createError.studentNotFound(studentId);
       }
 
-      const notification = await fastify.prisma.notification.create({
-        data: {
-          userId: student.userId,
-          type: 'teacher_push',
-          title,
-          content: content ?? null,
-          relatedId: studentId,
-        },
-      });
-
-      // 同时创建推送渠道记录（站内通知）
-      await fastify.prisma.notificationDelivery.create({
-        data: {
-          notificationId: notification.id,
-          channel: 'in_app',
-          status: 'sent',
-          sentAt: new Date(),
-        },
+      const notification = await createInAppNotification(fastify.prisma, {
+        userId: student.userId,
+        type: 'teacher_push',
+        title,
+        content: content ?? null,
+        relatedId: studentId,
       });
 
       return reply.status(201).send({

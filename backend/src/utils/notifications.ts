@@ -9,7 +9,7 @@ export async function createInAppNotification(
     content?: string | null;
     relatedId?: string | null;
   },
-): Promise<void> {
+): Promise<{ id: string }> {
   const notification = await prisma.notification.create({
     data: {
       userId: data.userId,
@@ -28,4 +28,6 @@ export async function createInAppNotification(
       sentAt: new Date(),
     },
   });
+
+  return { id: notification.id };
 }

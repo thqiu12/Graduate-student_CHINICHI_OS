@@ -38,7 +38,8 @@ assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', 'teacher-st
 assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', '已上传文件');
 assertContains('backend/src/routes/plans.ts', 'PlanStatus.cancelled');
 assertContains('backend/src/routes/plans.ts', 'createInAppNotification');
-assertContains('backend/src/routes/plans.ts', 'notificationDelivery.create');
+assertContains('backend/src/utils/notifications.ts', 'notificationDelivery.create');
+assertContains('backend/src/routes/notifications.ts', 'createInAppNotification');
 assertContains('backend/src/routes/plans.ts', 'task_done');
 assertContains('backend/src/routes/plans.ts', 'task_reopen');
 assertContains('frontend/src/api/plans.api.ts', 'planQueryKeys.logs(studentId)');
@@ -47,7 +48,6 @@ assertContains('backend/src/routes/risk-tags.ts', "targetType: 'student_risk_tag
 assertContains('frontend/src/api/coaching.api.ts', 'planQueryKeys.all(studentId)');
 assertContains('frontend/src/pages/teacher/StudentDetail/StagesTab.tsx', 'getErrorMessage');
 assertContains('frontend/src/pages/teacher/StudentDetail/TasksTab.tsx', 'getErrorMessage');
-assertContains('backend/src/utils/notifications.ts', 'notificationDelivery.create');
 assertContains('backend/src/jobs/check-overdue-tasks.job.ts', 'createInAppNotification');
 assertContains('backend/src/jobs/check-unconfirmed-plans.job.ts', 'createInAppNotification');
 assertContains('backend/src/jobs/check-unset-plans.job.ts', 'createInAppNotification');
