@@ -8,6 +8,7 @@ import { authenticate } from '../middlewares/authenticate';
 import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, createError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
+import { assertStudentAccess, buildStudentScopeWhere } from '../utils/access-control';
 
 // ─── 请求体 Schema ───────────────────────────────────────
 const createStudentSchema = z.object({
@@ -15,7 +16,7 @@ const createStudentSchema = z.object({
   phone: z.string().regex(/^1[3-9]\d{9}$/, '手机号格式不正确'),
   campusId: z.number().int().positive(),
   subjectId: z.number().int().positive(),
-  teacherId: z.string().uuid('班主任ID格式不正确'),
+  teacherId: z.string().uuid('班主任ID格式不正确').optional(),
   entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式应为 YYYY-MM-DD'),
   targetYear: z.string().optional(),
   targetSeason: z.string().optional(),
@@ -65,20 +66,18 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
       const user = request.user as JwtPayload;
       const query = listQuerySchema.parse(request.query);
 
-      const whereClause: Record<string, unknown> = {};
-
-      // 教务总负责人可查看全部学生
-      // 学科负责人只能查看本学科学生
-      // 班主任只能查看自己负责的学生
-      if (user.roles.includes(Roles.TEACHER) && !user.roles.includes(Roles.ADMIN_TOTAL) && !user.roles.includes(Roles.SUBJECT_HEAD)) {
-        whereClause['teachers'] = {
-          some: { teacherId: user.sub, endedAt: null },
-        };
-      }
+      const whereClause: Record<string, unknown> = await buildStudentScopeWhere(fastify, user);
 
       if (query.campusId) whereClause['campusId'] = query.campusId;
-      if (query.subjectId) whereClause['subjectId'] = query.subjectId;
-      if (query.teacherId) {
+      if (query.subjectId) {
+        const scopedSubject = whereClause['subjectId'] as { in?: number[] } | number | undefined;
+        if (typeof scopedSubject === 'object' && scopedSubject?.in) {
+          whereClause['subjectId'] = scopedSubject.in.includes(query.subjectId) ? query.subjectId : -1;
+        } else {
+          whereClause['subjectId'] = query.subjectId;
+        }
+      }
+      if (query.teacherId && !user.roles.includes(Roles.TEACHER)) {
         whereClause['teachers'] = {
           some: { teacherId: query.teacherId, endedAt: null },
         };
@@ -157,15 +156,7 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
       const { id } = request.params;
       const user = request.user as JwtPayload;
 
-      // 学生只能查看自己
-      if (user.roles.includes(Roles.STUDENT)) {
-        const student = await fastify.prisma.student.findFirst({
-          where: { id, userId: user.sub },
-        });
-        if (!student) {
-          throw createError.forbidden('只能查看自己的档案');
-        }
-      }
+      await assertStudentAccess(fastify, user, id);
 
       const student = await fastify.prisma.student.findUnique({
         where: { id },
@@ -201,7 +192,17 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
         throw createError.studentNotFound(id);
       }
 
-      return reply.send({ data: student });
+      const safeStudent = user.roles.includes(Roles.STUDENT)
+        ? {
+            ...student,
+            periodPlans: student.periodPlans.map((plan) => ({
+              ...plan,
+              tasks: plan.status === 'active' ? plan.tasks : [],
+            })),
+          }
+        : student;
+
+      return reply.send({ data: safeStudent });
     },
   );
 
@@ -223,6 +224,11 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
         throw new AppError(ErrorCode.VALIDATION_ERROR, '请求参数错误', parsed.error.flatten());
       }
       const body = parsed.data;
+      const user = request.user as JwtPayload;
+      const teacherId = body.teacherId ?? (user.roles.includes(Roles.TEACHER) ? user.sub : null);
+      if (!teacherId) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, '请选择班主任');
+      }
 
       // 检查手机号是否已存在
       const existingUser = await fastify.prisma.user.findUnique({
@@ -234,6 +240,11 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
 
       // 事务创建用户和学生档案
       const result = await fastify.prisma.$transaction(async (tx) => {
+        const studentRole = await tx.role.findUnique({ where: { code: Roles.STUDENT } });
+        if (!studentRole) {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, '学生角色未初始化');
+        }
+
         // 创建用户账号
         const newUser = await tx.user.create({
           data: {
@@ -247,7 +258,7 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
         await tx.userRole.create({
           data: {
             userId: newUser.id,
-            roleId: 4, // student role
+            roleId: studentRole.id,
           },
         });
 
@@ -272,7 +283,7 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
         await tx.studentTeacher.create({
           data: {
             studentId: student.id,
-            teacherId: body.teacherId,
+            teacherId,
           },
         });
 
@@ -307,6 +318,7 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
       if (!student) {
         throw createError.studentNotFound(id);
       }
+      await assertStudentAccess(fastify, request.user as JwtPayload, id);
 
       const updated = await fastify.prisma.student.update({
         where: { id },
@@ -358,6 +370,7 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
       if (!student) {
         throw createError.studentNotFound(id);
       }
+      await assertStudentAccess(fastify, user, id);
 
       await fastify.prisma.$transaction(async (tx) => {
         // 关闭旧的班主任关联

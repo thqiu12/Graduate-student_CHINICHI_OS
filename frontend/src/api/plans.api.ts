@@ -82,6 +82,13 @@ async function changePlan(
   return response.data.data;
 }
 
+async function completePlan(studentId: string, planId: string): Promise<PeriodPlan> {
+  const response = await apiClient.post<PlanResponse>(
+    `/students/${studentId}/plans/${planId}/complete`,
+  );
+  return response.data.data;
+}
+
 /**
  * 获取操作日志
  */
@@ -202,6 +209,20 @@ export function useChangePlan(
   return useMutation({
     mutationFn: ({ planId, ...body }: { planId: string } & ChangePlanRequest) =>
       changePlan(studentId, planId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: planQueryKeys.all(studentId) });
+      queryClient.invalidateQueries({ queryKey: planQueryKeys.logs(studentId) });
+    },
+  });
+}
+
+export function useCompletePlan(
+  studentId: string,
+): UseMutationResult<PeriodPlan, Error, string> {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (planId: string) => completePlan(studentId, planId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: planQueryKeys.all(studentId) });
       queryClient.invalidateQueries({ queryKey: planQueryKeys.logs(studentId) });

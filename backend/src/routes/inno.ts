@@ -7,9 +7,10 @@ import { authenticate } from '../middlewares/authenticate';
 import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
+import { assertStudentAccess } from '../utils/access-control';
 
 const updateInnoSchema = z.object({
-  status: z.enum(['not_started', 'in_progress', 'confirmed', 'failed']).optional(),
+  status: z.enum(['not_started', 'in_progress', 'confirmed', 'rejected']).optional(),
   notes: z.string().optional(),
   confirmedAt: z.string().optional(),
 });
@@ -27,6 +28,7 @@ export async function innoRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER, Roles.STUDENT])] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = request.params as { id: string };
+      await assertStudentAccess(fastify, request.user as JwtPayload, id);
 
       const schools = await fastify.prisma.targetSchool.findMany({
         where: { studentId: id },
@@ -51,6 +53,7 @@ export async function innoRoutes(fastify: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
       const { id, schoolId } = request.params as { id: string; schoolId: string };
+      await assertStudentAccess(fastify, user, id);
       const body = updateInnoSchema.parse(request.body);
 
       const school = await fastify.prisma.targetSchool.findFirst({
@@ -95,7 +98,8 @@ export async function innoRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER])] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
-      const { schoolId } = request.params as { id: string; schoolId: string };
+      const { id, schoolId } = request.params as { id: string; schoolId: string };
+      await assertStudentAccess(fastify, user, id);
       const body = addContactSchema.parse(request.body);
 
       const tracking = await fastify.prisma.innoTracking.upsert({

@@ -138,7 +138,10 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.send({ message: '验证码已发送（开发模式）', expiresIn: 300 });
       }
 
-      return reply.send({ message: '验证码已发送', expiresIn: 300 });
+      throw new AppError(
+        ErrorCode.NOT_IMPLEMENTED,
+        '生产环境短信服务尚未配置，无法发送验证码',
+      );
     },
   );
 
@@ -155,7 +158,13 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       }
       const { phone, code } = parsed.data;
 
-      // 验证短信验证码（演示系统固定允许 123456）
+      // 开发环境允许固定验证码；生产环境必须接入短信服务后校验 Redis 中的一次性验证码
+      if (process.env['NODE_ENV'] !== 'development') {
+        throw new AppError(
+          ErrorCode.NOT_IMPLEMENTED,
+          '生产环境短信验证码校验尚未配置，请使用账号密码登录',
+        );
+      }
       if (code !== '123456') {
         throw new AppError(ErrorCode.SMS_CODE_INVALID, '验证码不正确或已过期');
       }

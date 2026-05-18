@@ -11,6 +11,7 @@ export const ErrorCode = {
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   NOT_FOUND: 'NOT_FOUND',
   CONFLICT: 'CONFLICT',
+  NOT_IMPLEMENTED: 'NOT_IMPLEMENTED',
 
   // 认证与权限
   UNAUTHORIZED: 'UNAUTHORIZED',
@@ -53,6 +54,7 @@ const statusCodeMap: Record<ErrorCodeType, number> = {
   [ErrorCode.VALIDATION_ERROR]: 400,
   [ErrorCode.NOT_FOUND]: 404,
   [ErrorCode.CONFLICT]: 409,
+  [ErrorCode.NOT_IMPLEMENTED]: 501,
 
   [ErrorCode.UNAUTHORIZED]: 401,
   [ErrorCode.FORBIDDEN]: 403,

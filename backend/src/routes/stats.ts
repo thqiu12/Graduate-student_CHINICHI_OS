@@ -4,22 +4,27 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { authenticate } from '../middlewares/authenticate';
 import { authorize, Roles } from '../middlewares/authorize';
+import { JwtPayload } from '../plugins/auth';
+import { buildStudentScopeWhere } from '../utils/access-control';
 
 export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
   // GET /api/stats/overview
   fastify.get(
     '/stats/overview',
     { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD])] },
-    async (_request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const studentScope = await buildStudentScopeWhere(fastify, user);
       const [totalStudents, riskStudentsRaw, plansData] = await Promise.all([
-        fastify.prisma.student.count(),
+        fastify.prisma.student.count({ where: studentScope }),
         fastify.prisma.studentRiskTag.findMany({
-          where: { removedAt: null },
+          where: { removedAt: null, student: studentScope },
           select: { studentId: true },
           distinct: ['studentId'],
         }),
         fastify.prisma.periodPlan.groupBy({
           by: ['status'],
+          where: { student: studentScope },
           _count: { id: true },
         }),
       ]);
@@ -32,12 +37,12 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
       // 7天内无规划的学生
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000);
       const studentsWithPlans = await fastify.prisma.periodPlan.findMany({
-        where: { createdAt: { gte: sevenDaysAgo } },
+        where: { createdAt: { gte: sevenDaysAgo }, student: studentScope },
         select: { studentId: true },
         distinct: ['studentId'],
       });
       const studentsWithPlanIds = new Set(studentsWithPlans.map(p => p.studentId));
-      const allStudentIds = await fastify.prisma.student.findMany({ select: { id: true } });
+      const allStudentIds = await fastify.prisma.student.findMany({ where: studentScope, select: { id: true } });
       const noRecentPlanCount = allStudentIds.filter(s => !studentsWithPlanIds.has(s.id)).length;
 
       return reply.send({
@@ -54,8 +59,11 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
     '/stats/exam-seasons',
     { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD])] },
-    async (_request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const studentScope = await buildStudentScopeWhere(fastify, user);
       const schools = await fastify.prisma.targetSchool.findMany({
+        where: { student: studentScope },
         include: { innoTracking: { select: { status: true } } },
       });
 
@@ -89,12 +97,15 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
     '/stats/alerts',
     { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD])] },
-    async (_request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const studentScope = await buildStudentScopeWhere(fastify, user);
       const now = new Date();
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
       const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 3600 * 1000);
 
       const students = await fastify.prisma.student.findMany({
+        where: studentScope,
         include: {
           user: { select: { name: true } },
           periodPlans: {
@@ -143,6 +154,8 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const query = request.query as { start?: string; end?: string };
+      const user = request.user as JwtPayload;
+      const studentScope = await buildStudentScopeWhere(fastify, user);
       const start = query.start ? new Date(query.start) : new Date(Date.now() - 90 * 24 * 3600 * 1000);
       const end = query.end ? new Date(query.end) : new Date(Date.now() + 180 * 24 * 3600 * 1000);
 
@@ -159,6 +172,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
         where: {
           dueDate: { gte: start, lte: end },
           status: { not: 'done' },
+          plan: { student: studentScope },
         },
         include: {
           plan: {
@@ -183,6 +197,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
       const schools = await fastify.prisma.targetSchool.findMany({
         where: {
           applicationEnd: { gte: start, lte: end },
+          student: studentScope,
         },
         include: {
           student: { include: { user: { select: { name: true } } } },
@@ -203,6 +218,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
       const examSchools = await fastify.prisma.targetSchool.findMany({
         where: {
           examDate: { gte: start, lte: end },
+          student: studentScope,
         },
         include: {
           student: { include: { user: { select: { name: true } } } },
@@ -224,6 +240,7 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
         where: {
           endDate: { gte: start, lte: end },
           status: { in: ['active', 'pending', 'change_pending'] },
+          student: studentScope,
         },
         include: {
           student: { include: { user: { select: { name: true } } } },
@@ -254,8 +271,12 @@ export async function statsRoutes(fastify: FastifyInstance): Promise<void> {
       ],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      // 获取当前班主任负责的所有学生
+      const user = request.user as JwtPayload;
+      const studentScope = await buildStudentScopeWhere(fastify, user);
+
+      // 获取当前用户权限范围内的学生
       const students = await fastify.prisma.student.findMany({
+        where: studentScope,
         select: {
           id: true,
           periodPlans: {

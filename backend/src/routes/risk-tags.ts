@@ -7,12 +7,17 @@ import { authenticate } from '../middlewares/authenticate';
 import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
+import { assertStudentAccess } from '../utils/access-control';
 
 const VALID_TAG_CODES = ['pace_risk', 'attitude_issue', 'inno_gap', 'preparation_weak', 'exam_repeat'];
 
 const addTagSchema = z.object({
   tagCode: z.string().refine(v => VALID_TAG_CODES.includes(v), '无效的风险标签码'),
-  reason: z.string().default(''),
+  reason: z.string().min(1, '风险原因不能为空'),
+});
+
+const removeTagSchema = z.object({
+  removeReason: z.string().min(1, '解除原因不能为空'),
 });
 
 export async function riskTagRoutes(fastify: FastifyInstance): Promise<void> {
@@ -22,6 +27,7 @@ export async function riskTagRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER])] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = request.params as { id: string };
+      await assertStudentAccess(fastify, request.user as JwtPayload, id);
       const tags = await fastify.prisma.studentRiskTag.findMany({
         where: { studentId: id, removedAt: null },
         include: { tag: true },
@@ -38,6 +44,7 @@ export async function riskTagRoutes(fastify: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
       const { id } = request.params as { id: string };
+      await assertStudentAccess(fastify, user, id);
       const { tagCode, reason } = addTagSchema.parse(request.body);
 
       const student = await fastify.prisma.student.findUnique({ where: { id } });
@@ -81,6 +88,8 @@ export async function riskTagRoutes(fastify: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
       const { id, tagCode } = request.params as { id: string; tagCode: string };
+      await assertStudentAccess(fastify, user, id);
+      const { removeReason } = removeTagSchema.parse(request.body ?? {});
 
       const riskTag = await fastify.prisma.riskTag.findFirst({ where: { code: tagCode } });
       if (!riskTag) throw new AppError(ErrorCode.NOT_FOUND, '风险标签不存在', 404);
@@ -92,7 +101,7 @@ export async function riskTagRoutes(fastify: FastifyInstance): Promise<void> {
 
       await fastify.prisma.studentRiskTag.update({
         where: { id: studentTag.id },
-        data: { removedAt: new Date(), removedBy: user.sub },
+        data: { removedAt: new Date(), removedBy: user.sub, removeReason },
       });
 
       await fastify.prisma.operationLog.create({
@@ -100,7 +109,7 @@ export async function riskTagRoutes(fastify: FastifyInstance): Promise<void> {
           studentId: id,
           actorId: user.sub,
           actionType: 'tag_remove',
-          detail: { tagCode, tagName: riskTag.label } as any,
+          detail: { tagCode, tagName: riskTag.label, removeReason } as any,
         },
       });
 

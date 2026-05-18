@@ -31,7 +31,7 @@ export interface CreateUserBody {
   name: string;
   phone: string;
   password: string;
-  role: string;
+  roleCode: string;
   campusId?: number | null;
   subjectId?: number | null;
 }
@@ -40,7 +40,7 @@ export interface UpdateUserBody {
   name?: string;
   phone?: string;
   password?: string;
-  role?: string;
+  roleCode?: string;
   campusId?: number | null;
   subjectId?: number | null;
 }
@@ -115,6 +115,17 @@ export function useDisableUser() {
   return useMutation({
     mutationFn: async (id: string) => {
       const res = await apiClient.delete(`/users/${id}`);
+      return res.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: userQueryKeys.all }),
+  });
+}
+
+export function useSetUserActive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      const res = await apiClient.patch(`/users/${id}/status`, { isActive });
       return res.data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: userQueryKeys.all }),

@@ -14,7 +14,7 @@ import {
   useUsers,
   useCreateUser,
   useUpdateUser,
-  useDisableUser,
+  useSetUserActive,
   useCampuses,
   useSubjects,
   type UserItem,
@@ -78,7 +78,7 @@ const UserManagementPage: React.FC = () => {
 
   const createMutation = useCreateUser();
   const updateMutation = useUpdateUser();
-  const disableMutation = useDisableUser();
+  const setActiveMutation = useSetUserActive();
 
   // ─── 操作处理 ─────────────────────────────────────────
 
@@ -121,7 +121,10 @@ const UserManagementPage: React.FC = () => {
 
   const handleToggleDisable = async (user: UserItem) => {
     try {
-      await disableMutation.mutateAsync(user.id);
+      await setActiveMutation.mutateAsync({
+        id: user.id,
+        isActive: user.status !== 'active',
+      });
       messageApi.success(user.status === 'active' ? '用户已禁用' : '用户已启用');
     } catch (_e) {
       messageApi.error('操作失败，请重试');
@@ -133,7 +136,7 @@ const UserManagementPage: React.FC = () => {
     editForm.setFieldsValue({
       name: user.name,
       phone: user.phone ?? '',
-      role: user.roles?.[0],
+      roleCode: user.roles?.[0],
       campusId: user.campusId ?? undefined,
       subjectId: user.subjectId ?? undefined,
     });
@@ -259,7 +262,7 @@ const UserManagementPage: React.FC = () => {
         </Col>
         <Col span={12}>
           <Form.Item
-            name="role"
+            name="roleCode"
             label="角色"
             rules={[{ required: true, message: '请选择角色' }]}
           >

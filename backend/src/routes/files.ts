@@ -6,16 +6,31 @@ import { authenticate } from '../middlewares/authenticate';
 import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
+import { assertStudentAccess } from '../utils/access-control';
 import path from 'path';
 import fs from 'fs';
 import { pipeline } from 'stream/promises';
 
 const UPLOAD_DIR = '/home/work/uploads';
-const FILE_TYPES = ['research_plan', 'transcript', 'certificate', 'other'];
+const FILE_TYPES = [
+  'research_plan',
+  'transcript',
+  'recommendation',
+  'language_score',
+  'certificate',
+  'professor_email',
+  'application_receipt',
+  'other',
+];
+const STUDENT_UPLOAD_TYPES = ['research_plan', 'transcript', 'recommendation', 'language_score', 'certificate'];
 const FILE_TYPE_NAMES: Record<string, string> = {
   research_plan: '研究计划书',
   transcript: '成绩单',
   certificate: '证明文件',
+  recommendation: '推荐信',
+  language_score: '语言成绩证明',
+  professor_email: '教授邮件截图',
+  application_receipt: '出愿受理通知',
   other: '其他文件',
 };
 
@@ -31,6 +46,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER, Roles.STUDENT])] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = request.params as { id: string };
+      await assertStudentAccess(fastify, request.user as JwtPayload, id);
 
       const files = await fastify.prisma.file.findMany({
         where: { studentId: id },
@@ -58,10 +74,11 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /api/students/:id/files（multipart 上传）
   fastify.post(
     '/students/:id/files',
-    { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER])] },
+    { preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER, Roles.STUDENT])] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const user = request.user as JwtPayload;
       const { id } = request.params as { id: string };
+      await assertStudentAccess(fastify, user, id);
 
       const student = await fastify.prisma.student.findUnique({ where: { id } });
       if (!student) throw new AppError(ErrorCode.NOT_FOUND, '学生不存在', 404);
@@ -93,6 +110,10 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       if (!savedPath) throw new AppError(ErrorCode.VALIDATION_ERROR, '未上传文件', 400);
+      if (user.roles.includes(Roles.STUDENT) && !STUDENT_UPLOAD_TYPES.includes(fileType)) {
+        if (fs.existsSync(savedPath)) fs.unlinkSync(savedPath);
+        throw new AppError(ErrorCode.FILE_TYPE_NOT_ALLOWED, '学生不能上传该类型文件');
+      }
 
       // 计算版本号（research_plan 累加）
       let versionNo = 1;

@@ -39,6 +39,7 @@ import {
   useSendPlan,
   useChangePlan,
   useCreatePlan,
+  useCompletePlan,
   useOperationLogs,
   usePlanDiff,
 } from '../../../api/plans.api';
@@ -267,6 +268,7 @@ const StagesTab: React.FC<StagesTabProps> = ({ studentId, studentName }) => {
   const sendPlanMutation = useSendPlan(studentId);
   const changePlanMutation = useChangePlan(studentId);
   const createPlanMutation = useCreatePlan(studentId);
+  const completePlanMutation = useCompletePlan(studentId);
 
   // ─── 当前活跃规划 ─────────────────────────────────────
   const currentPlan = useMemo(() => {
@@ -343,6 +345,15 @@ const StagesTab: React.FC<StagesTabProps> = ({ studentId, studentName }) => {
       createForm.resetFields();
     } catch (_err) {
       messageApi.error('创建失败，请重试');
+    }
+  };
+
+  const handleCompletePlan = async (planId: string) => {
+    try {
+      await completePlanMutation.mutateAsync(planId);
+      messageApi.success('阶段规划已完成');
+    } catch (_err) {
+      messageApi.error('完成失败，请重试');
     }
   };
 
@@ -434,15 +445,28 @@ const StagesTab: React.FC<StagesTabProps> = ({ studentId, studentName }) => {
                         )}
                         {/* 活跃状态：可发起变更 */}
                         {plan.status === PlanStatus.Active && (
-                          <Tooltip title="发起规划变更">
-                            <Button
-                              size="small"
-                              icon={<SyncOutlined />}
-                              onClick={() => handleOpenChangePlan(plan.id)}
-                            >
-                              发起变更
-                            </Button>
-                          </Tooltip>
+                          <>
+                            <Tooltip title="发起规划变更">
+                              <Button
+                                size="small"
+                                icon={<SyncOutlined />}
+                                onClick={() => handleOpenChangePlan(plan.id)}
+                              >
+                                发起变更
+                              </Button>
+                            </Tooltip>
+                            <Tooltip title="标记阶段完成">
+                              <Button
+                                size="small"
+                                type="primary"
+                                ghost
+                                loading={completePlanMutation.isPending}
+                                onClick={() => handleCompletePlan(plan.id)}
+                              >
+                                完成阶段
+                              </Button>
+                            </Tooltip>
+                          </>
                         )}
                       </Space>
                     </div>

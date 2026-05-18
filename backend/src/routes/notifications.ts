@@ -8,6 +8,7 @@ import { authenticate } from '../middlewares/authenticate';
 import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, createError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
+import { assertStudentAccess } from '../utils/access-control';
 
 // ─── 请求参数 Schema ─────────────────────────────────────
 const listQuerySchema = z.object({
@@ -163,11 +164,14 @@ export async function notificationRoutes(fastify: FastifyInstance): Promise<void
       }>,
       reply: FastifyReply,
     ) => {
+      const user = request.user as JwtPayload;
       const { studentId, title, content } = request.body;
 
       if (!studentId || !title) {
         throw new AppError(ErrorCode.VALIDATION_ERROR, '学生ID和标题不能为空');
       }
+
+      await assertStudentAccess(fastify, user, studentId);
 
       // 找到学生的 userId
       const student = await fastify.prisma.student.findUnique({

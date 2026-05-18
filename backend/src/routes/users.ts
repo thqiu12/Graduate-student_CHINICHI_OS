@@ -53,6 +53,42 @@ interface UserParams {
   id: string;
 }
 
+function serializeUser(user: {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt?: Date;
+  userRoles: Array<{
+    role: { code: string; name: string };
+    campus: { id: number; name: string } | null;
+    subject: { id: number; name: string } | null;
+  }>;
+}) {
+  const primaryRole = user.userRoles[0] ?? null;
+  return {
+    id: user.id,
+    name: user.name,
+    phone: user.phone,
+    email: user.email,
+    avatarUrl: user.avatarUrl,
+    roles: user.userRoles.map((ur) => ur.role.code),
+    roleCode: primaryRole?.role.code ?? null,
+    roleName: primaryRole?.role.name ?? null,
+    campusId: primaryRole?.campus?.id ?? null,
+    campusName: primaryRole?.campus?.name ?? null,
+    subjectId: primaryRole?.subject?.id ?? null,
+    subjectName: primaryRole?.subject?.name ?? null,
+    status: user.isActive ? 'active' : 'disabled',
+    isActive: user.isActive,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
+
 // ─── 路由注册函数 ─────────────────────────────────────────
 export async function userRoutes(fastify: FastifyInstance): Promise<void> {
   // ──────────────────────────────────────────────────────────
@@ -182,7 +218,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
       ]);
 
       return reply.send({
-        data: users,
+        data: users.map(serializeUser),
         pagination: {
           total,
           page,
@@ -282,7 +318,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
-      return reply.status(201).send({ data: userWithRoles });
+      return reply.status(201).send({ data: userWithRoles ? serializeUser(userWithRoles) : null });
     },
   );
 
@@ -398,7 +434,53 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
-      return reply.send({ data: updatedUser });
+      return reply.send({ data: serializeUser(updatedUser) });
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────
+  // PATCH /api/users/:id/status - 启用/禁用用户
+  // ──────────────────────────────────────────────────────────
+  fastify.patch<{ Params: UserParams; Body: { isActive: boolean } }>(
+    '/users/:id/status',
+    {
+      preHandler: [authenticate, authorize([Roles.ADMIN_TOTAL])],
+    },
+    async (
+      request: FastifyRequest<{ Params: UserParams; Body: { isActive: boolean } }>,
+      reply: FastifyReply,
+    ) => {
+      const { id } = request.params;
+      const currentUser = request.user as JwtPayload;
+      const body = z.object({ isActive: z.boolean() }).parse(request.body);
+
+      if (currentUser.sub === id && !body.isActive) {
+        throw new AppError(ErrorCode.FORBIDDEN, '不能禁用自己的账号');
+      }
+
+      const updatedUser = await fastify.prisma.user.update({
+        where: { id },
+        data: { isActive: body.isActive },
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          email: true,
+          avatarUrl: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          userRoles: {
+            include: {
+              role: true,
+              campus: true,
+              subject: true,
+            },
+          },
+        },
+      });
+
+      return reply.send({ data: serializeUser(updatedUser) });
     },
   );
 

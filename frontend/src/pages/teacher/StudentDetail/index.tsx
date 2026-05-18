@@ -165,7 +165,7 @@ const SchoolsTab: React.FC<{ studentId: string }> = ({ studentId }) => {
           not_started: { color: 'default', text: '未开始' },
           in_progress: { color: 'processing', text: '跟进中' },
           confirmed: { color: 'success', text: '已内诺' },
-          failed: { color: 'error', text: '未通过' },
+          rejected: { color: 'error', text: '已拒绝' },
         };
         const s = map[t.status] ?? { color: 'default', text: t.status };
         return <Badge status={s.color} text={s.text} />;

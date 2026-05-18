@@ -10,6 +10,7 @@ import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, createError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
 import { PlanStatus, Prisma } from '@prisma/client';
+import { assertStudentAccess } from '../utils/access-control';
 
 // ─── 请求体 Schema ───────────────────────────────────────
 const createPlanSchema = z.object({
@@ -107,15 +108,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       const { studentId } = request.params;
       const user = request.user as JwtPayload;
 
-      // 学生只能查看自己的规划
-      if (user.roles.includes(Roles.STUDENT)) {
-        const student = await fastify.prisma.student.findFirst({
-          where: { id: studentId, userId: user.sub },
-        });
-        if (!student) {
-          throw createError.forbidden('只能查看自己的规划');
-        }
-      }
+      await assertStudentAccess(fastify, user, studentId);
 
       const plans = await fastify.prisma.periodPlan.findMany({
         where: { studentId },
@@ -131,7 +124,14 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         orderBy: [{ periodCode: 'asc' }, { version: 'desc' }],
       });
 
-      return reply.send({ data: plans });
+      const visiblePlans = user.roles.includes(Roles.STUDENT)
+        ? plans.map((plan) => ({
+            ...plan,
+            tasks: plan.status === PlanStatus.active ? plan.tasks : [],
+          }))
+        : plans;
+
+      return reply.send({ data: visiblePlans });
     },
   );
 
@@ -150,6 +150,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     ) => {
       const { studentId } = request.params;
       const user = request.user as JwtPayload;
+      await assertStudentAccess(fastify, user, studentId);
 
       // 验证请求体
       const parsed = createPlanSchema.safeParse(request.body);
@@ -237,9 +238,11 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     ) => {
       const { studentId, planId } = request.params;
       const user = request.user as JwtPayload;
+      await assertStudentAccess(fastify, user, studentId);
 
       const plan = await fastify.prisma.periodPlan.findFirst({
         where: { id: planId, studentId },
+        include: { tasks: { orderBy: { sortOrder: 'asc' } } },
       });
 
       if (!plan) {
@@ -308,6 +311,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     ) => {
       const { studentId, planId } = request.params;
       const user = request.user as JwtPayload;
+      await assertStudentAccess(fastify, user, studentId);
 
       // 验证学生身份
       const student = await fastify.prisma.student.findFirst({
@@ -319,6 +323,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
 
       const plan = await fastify.prisma.periodPlan.findFirst({
         where: { id: planId, studentId },
+        include: { tasks: { orderBy: { sortOrder: 'asc' } } },
       });
 
       if (!plan) {
@@ -389,6 +394,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     ) => {
       const { studentId, planId } = request.params;
       const user = request.user as JwtPayload;
+      await assertStudentAccess(fastify, user, studentId);
 
       const parsed = rejectPlanSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -483,6 +489,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     ) => {
       const { studentId, planId } = request.params;
       const user = request.user as JwtPayload;
+      await assertStudentAccess(fastify, user, studentId);
 
       const parsed = changePlanSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -510,7 +517,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           studentId,
           periodCode: plan.periodCode,
           stageName: body.stageName ?? plan.stageName,
-          goal: plan.goal,
+          goal: body.goal ?? plan.goal,
           startDate: body.startDate ? new Date(body.startDate) : plan.startDate,
           endDate: body.endDate ? new Date(body.endDate) : plan.endDate,
           version: newVersion,
@@ -579,6 +586,54 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   // GET /api/students/:studentId/logs - 获取操作日志
+  fastify.post<{ Params: PlanParams }>(
+    '/students/:studentId/plans/:planId/complete',
+    {
+      preHandler: [
+        authenticate,
+        authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER]),
+      ],
+    },
+    async (
+      request: FastifyRequest<{ Params: PlanParams }>,
+      reply: FastifyReply,
+    ) => {
+      const { studentId, planId } = request.params;
+      const user = request.user as JwtPayload;
+      await assertStudentAccess(fastify, user, studentId);
+
+      const plan = await fastify.prisma.periodPlan.findFirst({
+        where: { id: planId, studentId },
+      });
+      if (!plan) throw createError.notFound('规划', planId);
+      if (plan.status !== PlanStatus.active) {
+        throw createError.planStatus(plan.status, 'active');
+      }
+
+      const updated = await fastify.prisma.periodPlan.update({
+        where: { id: planId },
+        data: { status: PlanStatus.completed },
+      });
+
+      await writeOperationLog(fastify, {
+        studentId,
+        actorId: user.sub,
+        actorName: user.name,
+        actionType: 'plan_complete',
+        targetType: 'period_plan',
+        targetId: planId,
+        detail: {
+          planVersion: plan.version,
+          stageName: plan.stageName,
+          completedAt: new Date().toISOString(),
+        } as unknown as Prisma.InputJsonValue,
+      });
+
+      return reply.send({ data: updated, message: '阶段规划已完成' });
+    },
+  );
+
+  // GET /api/students/:studentId/logs - 获取操作日志
   fastify.get<{ Params: StudentParams }>(
     '/students/:studentId/logs',
     {
@@ -599,15 +654,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       const { studentId } = request.params;
       const user = request.user as JwtPayload;
 
-      // 学生只能查看自己的日志
-      if (user.roles.includes(Roles.STUDENT)) {
-        const student = await fastify.prisma.student.findFirst({
-          where: { id: studentId, userId: user.sub },
-        });
-        if (!student) {
-          throw createError.forbidden('只能查看自己的操作日志');
-        }
-      }
+      await assertStudentAccess(fastify, user, studentId);
 
       const logs = await fastify.prisma.operationLog.findMany({
         where: { studentId },
@@ -631,13 +678,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       const body = request.body as { done: boolean; doneNote?: string };
       const user = request.user as JwtPayload;
 
-      // 学生只能操作自己的任务
-      if (user.roles.includes(Roles.STUDENT)) {
-        const student = await fastify.prisma.student.findFirst({
-          where: { id: studentId, userId: user.sub },
-        });
-        if (!student) throw createError.forbidden('只能操作自己的任务');
-      }
+      await assertStudentAccess(fastify, user, studentId);
 
       // 确认任务存在且属于该学生的规划
       const task = await fastify.prisma.periodPlanTask.findFirst({
@@ -670,6 +711,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { studentId, planId } = request.params as { studentId: string; planId: string };
+      await assertStudentAccess(fastify, request.user as JwtPayload, studentId);
       const body = request.body as {
         title: string;
         description?: string;
@@ -682,6 +724,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       // 确认规划存在且属于该学生
       const plan = await fastify.prisma.periodPlan.findFirst({
         where: { id: planId, studentId },
+        include: { tasks: { orderBy: { sortOrder: 'asc' } } },
       });
       if (!plan) throw createError.notFound('规划不存在');
 
@@ -710,6 +753,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { studentId, taskId } = request.params as { studentId: string; taskId: string };
+      await assertStudentAccess(fastify, request.user as JwtPayload, studentId);
       const body = request.body as {
         title?: string;
         description?: string;
@@ -766,15 +810,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         throw createError.notFound('规划', planId);
       }
 
-      // 学生只能查看自己的规划
-      if (user.roles.includes(Roles.STUDENT)) {
-        const student = await fastify.prisma.student.findFirst({
-          where: { id: currentPlan.studentId, userId: user.sub },
-        });
-        if (!student) {
-          throw createError.forbidden('只能查看自己的规划');
-        }
-      }
+      await assertStudentAccess(fastify, user, currentPlan.studentId);
 
       let previousPlan = null;
       if (currentPlan.previousPlanId) {
@@ -843,24 +879,38 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     ) => {
       const { studentId, planId } = request.params;
       const user = request.user as JwtPayload;
+      await assertStudentAccess(fastify, user, studentId);
 
       // 验证规划存在且属于该学生
       const plan = await fastify.prisma.periodPlan.findFirst({
         where: { id: planId, studentId },
+        include: { tasks: { orderBy: { sortOrder: 'asc' } } },
       });
 
       if (!plan) {
         throw createError.notFound('规划', planId);
       }
 
-      // 学生只能查看自己的规划
-      if (user.roles.includes(Roles.STUDENT)) {
-        const student = await fastify.prisma.student.findFirst({
-          where: { id: studentId, userId: user.sub },
+      let previousPlan = null;
+      if (plan.previousPlanId) {
+        previousPlan = await fastify.prisma.periodPlan.findUnique({
+          where: { id: plan.previousPlanId },
+          include: { tasks: { orderBy: { sortOrder: 'asc' } } },
         });
-        if (!student) {
-          throw createError.forbidden('只能查看自己的规划');
-        }
+      }
+
+      const diffs: Array<{ field: string; label: string; oldValue: string | null; newValue: string | null }> = [];
+      if (previousPlan) {
+        const compare = (field: string, label: string, oldVal: unknown, newVal: unknown) => {
+          const oldValue = oldVal !== null && oldVal !== undefined ? String(oldVal) : null;
+          const newValue = newVal !== null && newVal !== undefined ? String(newVal) : null;
+          if (oldValue !== newValue) diffs.push({ field, label, oldValue, newValue });
+        };
+        compare('stageName', '阶段名称', previousPlan.stageName, plan.stageName);
+        compare('goal', '阶段目标', previousPlan.goal, plan.goal);
+        compare('startDate', '开始日期', previousPlan.startDate?.toISOString().slice(0, 10), plan.startDate?.toISOString().slice(0, 10));
+        compare('endDate', '截止日期', previousPlan.endDate?.toISOString().slice(0, 10), plan.endDate?.toISOString().slice(0, 10));
+        compare('taskCount', '任务数量', previousPlan.tasks.length, plan.tasks.length);
       }
 
       // 查询该规划的操作日志（最近两条 update 类型）
@@ -881,13 +931,18 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         (l) => l.actionType === 'plan_change' || l.actionType === 'plan_update',
       );
 
-      const hasChanges = !!plan.changeReason || safeLogs.length > 1;
+      const hasChanges = !!plan.changeReason || diffs.length > 0 || safeLogs.length > 1;
 
       return reply.send({
-        hasChanges,
-        changeReason: plan.changeReason ?? null,
-        changedAt: latestUpdate?.createdAt ?? plan.createdAt,
-        logs: safeLogs,
+        data: {
+          current: plan,
+          previous: previousPlan,
+          diffs,
+          hasChanges,
+          changeReason: plan.changeReason ?? null,
+          changedAt: latestUpdate?.createdAt ?? plan.createdAt,
+          logs: safeLogs,
+        },
       });
     },
   );
@@ -900,6 +955,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { studentId, taskId } = request.params as { studentId: string; taskId: string };
+      await assertStudentAccess(fastify, request.user as JwtPayload, studentId);
 
       const task = await fastify.prisma.periodPlanTask.findFirst({
         where: { id: taskId, plan: { studentId } },
