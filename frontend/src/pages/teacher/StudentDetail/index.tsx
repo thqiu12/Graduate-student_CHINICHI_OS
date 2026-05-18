@@ -1,5 +1,5 @@
 // src/pages/teacher/StudentDetail/index.tsx
-// 知日塾大学院考学进度管理系统 - 学生详情页（5个Tab）
+// 知日塾大学院考学进度管理系统 - 学生详情页
 
 import React, { useState } from 'react';
 import {
@@ -20,7 +20,6 @@ import { useTargetSchools, useAddSchool, useDeleteSchool, useUpdateSchoolNode } 
 import { usePushNotification } from '../../../api/notifications.api';
 import StagesTab from './StagesTab';
 import TasksTab from './TasksTab';
-import GanttTab from './GanttTab';
 import apiClient, { getErrorMessage } from '../../../api/client';
 
 const { Title, Text } = Typography;
@@ -561,7 +560,6 @@ const StudentDetail: React.FC = () => {
           { key: 'coaching', label: '💬 辅导记录', children: <CoachingTab studentId={id ?? ''} /> },
           { key: 'tasks', label: '✅ 任务管理', children: <TasksTab studentId={id ?? ''} /> },
           { key: 'files', label: '📁 文件管理', children: <FilesTab studentId={id ?? ''} /> },
-          { key: 'gantt', label: '📊 规划总览', children: <GanttTab studentId={id ?? ''} studentName={student.user?.name ?? ''} /> },
         ]}
       />
 

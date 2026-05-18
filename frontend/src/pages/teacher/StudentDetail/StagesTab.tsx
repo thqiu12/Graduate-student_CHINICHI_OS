@@ -46,6 +46,7 @@ import {
 import { PlanBanner } from '../../../components/PlanBanner';
 import { TaskItem } from '../../../components/TaskItem';
 import { OperationLogList } from '../../../components/OperationLog';
+import GanttTab from './GanttTab';
 import {
   PlanStatus,
   type PeriodPlan,
@@ -396,6 +397,11 @@ const StagesTab: React.FC<StagesTabProps> = ({ studentId, studentName }) => {
       {currentPlan && currentPlan.status === PlanStatus.ChangePending && (
         <PlanDiffCard studentId={studentId} planId={currentPlan.id} />
       )}
+
+      {/* 规划总览 */}
+      <Card title="规划总览" style={{ marginBottom: 16 }}>
+        <GanttTab studentId={studentId} studentName={studentName} />
+      </Card>
 
       {/* 阶段时间轴 */}
       <Card title="考学阶段时间轴" style={{ marginBottom: 16 }}>

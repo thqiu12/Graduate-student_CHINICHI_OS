@@ -45,6 +45,8 @@ assertContains('backend/src/routes/files.ts', "actionType: 'file_upload'");
 assertContains('frontend/src/pages/student/Files.tsx', 'FILE_TYPE_OPTIONS');
 assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', 'teacher-student-files');
 assertContains('frontend/src/pages/teacher/StudentDetail/index.tsx', '已上传文件');
+assertContains('frontend/src/pages/teacher/StudentDetail/StagesTab.tsx', '规划总览');
+assertContains('frontend/src/pages/teacher/StudentDetail/StagesTab.tsx', '<GanttTab');
 assertContains('frontend/src/pages/teacher/Dashboard.tsx', 'studentDrawer');
 assertContains('frontend/src/pages/teacher/Dashboard.tsx', 'openStageStudents');
 assertContains('backend/src/routes/students.ts', 'targetSchools');
