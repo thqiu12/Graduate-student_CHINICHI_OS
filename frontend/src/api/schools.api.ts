@@ -3,6 +3,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from './client';
+import { planQueryKeys } from './plans.api';
 
 export interface TargetSchool {
   id: string;
@@ -45,7 +46,10 @@ export function useAddSchool(studentId: string) {
       const res = await apiClient.post(`/students/${studentId}/target-schools`, body);
       return res.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['schools', studentId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schools', studentId] });
+      qc.invalidateQueries({ queryKey: planQueryKeys.logs(studentId) });
+    },
   });
 }
 
@@ -55,7 +59,10 @@ export function useDeleteSchool(studentId: string) {
     mutationFn: async (schoolId: string) => {
       await apiClient.delete(`/students/${studentId}/target-schools/${schoolId}`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['schools', studentId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schools', studentId] });
+      qc.invalidateQueries({ queryKey: planQueryKeys.logs(studentId) });
+    },
   });
 }
 
@@ -66,6 +73,9 @@ export function useUpdateSchoolNode(studentId: string) {
       const res = await apiClient.patch(`/students/${studentId}/target-schools/${schoolId}/nodes/${nodeId}`, { isDone });
       return res.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['schools', studentId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['schools', studentId] });
+      qc.invalidateQueries({ queryKey: planQueryKeys.logs(studentId) });
+    },
   });
 }

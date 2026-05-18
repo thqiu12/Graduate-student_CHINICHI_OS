@@ -94,7 +94,10 @@ export async function schoolRoutes(fastify: FastifyInstance): Promise<void> {
         data: {
           studentId: id,
           actorId: user.sub,
+          actorName: user.name,
           actionType: 'school_add',
+          targetType: 'target_school',
+          targetId: school.id,
           detail: { schoolId: school.id, schoolName: body.universityName } as any,
         },
       });
@@ -152,7 +155,10 @@ export async function schoolRoutes(fastify: FastifyInstance): Promise<void> {
           data: {
             studentId: id,
             actorId: user.sub,
+            actorName: user.name,
             actionType: 'school_node_update',
+            targetType: 'school_progress_node',
+            targetId: String(node.id),
             detail: {
               schoolId: sid,
               nodeId: node.id,
@@ -198,7 +204,10 @@ export async function schoolRoutes(fastify: FastifyInstance): Promise<void> {
           data: {
             studentId: id,
             actorId: user.sub,
+            actorName: user.name,
             actionType: 'school_remove',
+            targetType: 'target_school',
+            targetId: sid,
             detail: {
               schoolId: sid,
               schoolName: school.universityName,

@@ -44,6 +44,8 @@ assertContains('backend/src/routes/plans.ts', 'task_reopen');
 assertContains('frontend/src/api/plans.api.ts', 'planQueryKeys.logs(studentId)');
 assertContains('backend/src/routes/schools.ts', "node.nodeCode === 'inno'");
 assertContains('backend/src/routes/schools.ts', 'removedInnoTracking');
+assertContains('backend/src/routes/schools.ts', "targetType: 'target_school'");
+assertContains('frontend/src/api/schools.api.ts', 'planQueryKeys.logs(studentId)');
 assertContains('backend/src/routes/inno.ts', "nodeCode: 'inno'");
 assertContains('backend/src/routes/inno.ts', 'inno_status_update');
 assertContains('backend/src/routes/inno.ts', 'inno_contact_add');
