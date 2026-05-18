@@ -32,15 +32,24 @@ export interface NotificationsResponse {
 // ─── 通知类型中文映射 ──────────────────────────────────────
 
 export const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
-  plan_sent:       '📋 规划已发送',
-  plan_confirmed:  '✅ 规划已确认',
-  plan_rejected:   '⚠️ 规划有异议',
-  plan_changed:    '🔄 规划已更新',
-  task_due:        '⏰ 任务即将截止',
-  task_overdue:    '🔴 任务已逾期',
-  teacher_push:    '📢 班主任通知',
-  risk_tagged:     '⚠️ 风险标签',
-  system:          '🔔 系统通知',
+  plan_sent:                '📋 规划已发送',
+  plan_pending:             '📋 规划待确认',
+  plan_confirmed:           '✅ 规划已确认',
+  plan_rejected:            '⚠️ 规划有异议',
+  plan_changed:             '🔄 规划已更新',
+  plan_change_pending:      '🔄 规划变更待确认',
+  plan_unconfirmed_student: '⏰ 规划待确认',
+  plan_unconfirmed_teacher: '⏰ 规划未确认',
+  plan_unconfirmed_dept:    '🚨 规划升级告警',
+  task_due:                 '⏰ 任务即将截止',
+  task_overdue:             '🔴 任务已逾期',
+  task_overdue_teacher:     '🔴 学生任务逾期',
+  teacher_push:             '📢 班主任通知',
+  alert_no_plan:            '🚨 未设定规划',
+  weekly_summary_teacher:   '📊 班主任周报',
+  weekly_summary_dept:      '📊 学科周报',
+  risk_tagged:              '⚠️ 风险标签',
+  system:                   '🔔 系统通知',
 };
 
 // ─── Query Keys ───────────────────────────────────────────

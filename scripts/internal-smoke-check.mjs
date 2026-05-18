@@ -30,6 +30,8 @@ for (const phone of demoPhones) {
 
 assertContains('frontend/src/App.tsx', 'path="/notifications"');
 assertContains('frontend/vite.config.ts', 'chunkSizeWarningLimit: 1300');
+assertContains('frontend/src/api/notifications.api.ts', 'plan_unconfirmed_teacher');
+assertContains('frontend/src/api/notifications.api.ts', 'weekly_summary_dept');
 assertContains('frontend/src/pages/admin/UserManagement.tsx', '导入学生CSV');
 assertContains('backend/src/routes/students.ts', '/students/import');
 assertContains('backend/src/routes/files.ts', '/students/:id/files/:fileId/versions/:versionId/download');
