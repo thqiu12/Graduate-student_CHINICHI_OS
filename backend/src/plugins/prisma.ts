@@ -1,6 +1,7 @@
 // src/plugins/prisma.ts
 // 知日塾大学院考学进度管理系统 - Fastify Prisma 插件
-// 将 PrismaClient 注入到 Fastify 实例，作为全局可用的数据库客户端
+// 将 PrismaClient 注入到 Fastify 实例，作为全局可用的数据库客户端。
+// 测试可通过 { client: mockPrisma } 注入 mock 实例,跳过真实数据库连接。
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const fp = require('fastify-plugin');
@@ -14,23 +15,43 @@ declare module 'fastify' {
   }
 }
 
-const prismaPlugin: FastifyPluginAsync = async (fastify: FastifyInstance) => {
-  const prisma = new PrismaClient({
-    log:
-      process.env['NODE_ENV'] === 'development'
-        ? ['query', 'info', 'warn', 'error']
-        : ['warn', 'error'],
+export interface PrismaPluginOptions {
+  /** 由调用方提供的 Prisma 客户端(测试场景注入 mock);未提供时插件自建并管理生命周期 */
+  client?: PrismaClient;
+}
+
+const prismaPlugin: FastifyPluginAsync<PrismaPluginOptions> = async (
+  fastify: FastifyInstance,
+  opts,
+) => {
+  const externallyOwned = Boolean(opts?.client);
+  const prisma =
+    opts?.client ??
+    new PrismaClient({
+      log:
+        process.env['NODE_ENV'] === 'development'
+          ? ['query', 'info', 'warn', 'error']
+          : ['warn', 'error'],
+    });
+
+  if (!externallyOwned) {
+    await prisma.$connect();
+  }
+
+  // 注:fastify.decorate 在某些场景(如把 Proxy/mock 当成 value)会处理不当,
+  // 直接用 defineProperty 强制挂载,行为更可控。
+  Object.defineProperty(fastify, 'prisma', {
+    value: prisma,
+    configurable: true,
+    writable: true,
+    enumerable: false,
   });
 
-  // 连接数据库
-  await prisma.$connect();
-
-  // 注册到 Fastify 实例
-  fastify.decorate('prisma', prisma);
-
-  // 应用关闭时断开连接
-  fastify.addHook('onClose', async (instance) => {
-    await instance.prisma.$disconnect();
+  // 应用关闭时断开自有连接;外部注入的由调用方负责
+  fastify.addHook('onClose', async () => {
+    if (!externallyOwned) {
+      await prisma.$disconnect();
+    }
   });
 
   fastify.log.info('Prisma 数据库客户端已连接');

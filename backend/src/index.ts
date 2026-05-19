@@ -44,10 +44,19 @@ const NODE_ENV = process.env['NODE_ENV'] ?? 'development';
 // 是否在响应体里暴露内部错误细节。仅在显式开启时为 true，避免 NODE_ENV 误配导致泄露。
 const EXPOSE_ERROR_DETAILS = process.env['EXPOSE_ERROR_DETAILS'] === 'true';
 
+import type { PrismaClient } from '@prisma/client';
+
+export interface BuildAppOptions {
+  /** 注入 Prisma 客户端(测试场景常用,跳过 plugin 自建) */
+  prisma?: PrismaClient;
+  /** 关掉全局限流(测试场景默认关) */
+  disableRateLimit?: boolean;
+}
+
 /**
  * 构建 Fastify 应用实例
  */
-async function buildApp(): Promise<FastifyInstance> {
+export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInstance> {
   const fastify = Fastify({
     logger: {
       level: process.env['LOG_LEVEL'] ?? 'info',
@@ -101,7 +110,8 @@ async function buildApp(): Promise<FastifyInstance> {
     global: true,
     max: 300,
     timeWindow: '1 minute',
-    allowList: NODE_ENV === 'test' ? () => true : undefined,
+    allowList:
+      opts.disableRateLimit || NODE_ENV === 'test' ? () => true : undefined,
   });
 
   // ─── Multipart（文件上传）────────────────────────────────
@@ -112,7 +122,7 @@ async function buildApp(): Promise<FastifyInstance> {
   });
 
   // ─── 自定义插件 ──────────────────────────────────────────
-  await fastify.register(prismaPlugin);
+  await fastify.register(prismaPlugin, opts.prisma ? { client: opts.prisma } : {});
   await fastify.register(authPlugin);
 
   // ─── 全局 CSRF 守卫(double-submit cookie) ─────────────
@@ -253,4 +263,7 @@ async function start(): Promise<void> {
   }
 }
 
-start();
+// 只在直接执行时启动服务;被 import(测试场景)时不自动 start
+if (require.main === module) {
+  start();
+}

@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:smoke": "node ../scripts/internal-smoke-check.mjs",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
@@ -39,7 +41,9 @@
     "@types/node": "^20.14.10",
     "prisma": "^5.14.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.3"
+    "typescript": "^5.5.3",
+    "vitest": "^2.0.5",
+    "vitest-mock-extended": "^2.0.0"
   },
   "engines": {
     "node": ">=20.0.0"
