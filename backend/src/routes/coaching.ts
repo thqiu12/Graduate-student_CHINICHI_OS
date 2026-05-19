@@ -38,18 +38,33 @@ export async function coachingRoutes(fastify: FastifyInstance): Promise<void> {
       const student = await fastify.prisma.student.findUnique({ where: { id } });
       if (!student) throw new AppError(ErrorCode.NOT_FOUND, '学生不存在', 404);
 
-      const [records, total] = await Promise.all([
+      // 返回完整辅导历史:不按当前班主任过滤,保留前任老师写下的记录;
+      // 同步返回 currentTeacherId,让前端可以区分"现任 / 前任"老师。
+      const [records, total, currentRelation] = await Promise.all([
         fastify.prisma.coachingRecord.findMany({
           where: { studentId: id },
           orderBy: { coachedAt: 'desc' },
           skip: (page - 1) * pageSize,
           take: pageSize,
-          include: { todos: true },
+          include: {
+            todos: true,
+            teacher: { select: { id: true, name: true } },
+          },
         }),
         fastify.prisma.coachingRecord.count({ where: { studentId: id } }),
+        fastify.prisma.studentTeacher.findFirst({
+          where: { studentId: id, endedAt: null },
+          select: { teacherId: true },
+        }),
       ]);
 
-      return reply.send({ data: records, total, page, pageSize });
+      return reply.send({
+        data: records,
+        total,
+        page,
+        pageSize,
+        currentTeacherId: currentRelation?.teacherId ?? null,
+      });
     }
   );
 
@@ -62,7 +77,10 @@ export async function coachingRoutes(fastify: FastifyInstance): Promise<void> {
       await assertStudentAccess(fastify, request.user as JwtPayload, id);
       const record = await fastify.prisma.coachingRecord.findFirst({
         where: { id: rid, studentId: id },
-        include: { todos: true },
+        include: {
+          todos: true,
+          teacher: { select: { id: true, name: true } },
+        },
       });
       if (!record) throw new AppError(ErrorCode.NOT_FOUND, '辅导记录不存在', 404);
       return reply.send(record);

@@ -9,6 +9,8 @@ export interface CoachingRecord {
   id: string;
   studentId: string;
   teacherId: string;
+  /** 创建该记录时的班主任(后端 include) */
+  teacher?: { id: string; name: string } | null;
   coachedAt: string;
   form: string;
   content: string;
@@ -31,7 +33,12 @@ export function useCoachingRecords(studentId: string) {
     queryKey: ['coaching', studentId],
     queryFn: async () => {
       const res = await apiClient.get(`/students/${studentId}/coaching-records`);
-      return res.data as { data: CoachingRecord[]; total: number };
+      return res.data as {
+        data: CoachingRecord[];
+        total: number;
+        /** 当前(active) 班主任的 userId; 用于前端标注"前任班主任"记录 */
+        currentTeacherId: string | null;
+      };
     },
     enabled: !!studentId,
   });

@@ -63,6 +63,7 @@ const CoachingTab: React.FC<{ studentId: string }> = ({ studentId }) => {
 
   if (isLoading) return <Spin />;
   const records = data?.data ?? [];
+  const currentTeacherId = data?.currentTeacherId ?? null;
 
   return (
     <>
@@ -77,24 +78,40 @@ const CoachingTab: React.FC<{ studentId: string }> = ({ studentId }) => {
         <Empty description="暂无辅导记录" />
       ) : (
         <Timeline
-          items={records.map(r => ({
-            color: 'blue',
-            children: (
-              <Card size="small" style={{ marginBottom: 4 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <Text strong>{dayjs(r.coachedAt).format('YYYY年MM月DD日')}</Text>
-                  <Tag>{FORM_LABELS[r.form] ?? r.form}</Tag>
-                </div>
-                <Text>{r.content}</Text>
-                {r.todos?.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>📋 TODO：</Text>
-                    {r.todos.map(t => <div key={t.id} style={{ fontSize: 12, color: '#666' }}>• {t.title}</div>)}
+          items={records.map(r => {
+            const isFormerTeacher =
+              currentTeacherId !== null && r.teacherId !== currentTeacherId;
+            return {
+              color: isFormerTeacher ? 'gray' : 'blue',
+              children: (
+                <Card
+                  size="small"
+                  style={{
+                    marginBottom: 4,
+                    background: isFormerTeacher ? '#fafafa' : undefined,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Space size={6}>
+                      <Text strong>{dayjs(r.coachedAt).format('YYYY年MM月DD日')}</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {r.teacher?.name ?? '—'} 老师
+                      </Text>
+                      {isFormerTeacher && <Tag color="default">前任班主任</Tag>}
+                    </Space>
+                    <Tag>{FORM_LABELS[r.form] ?? r.form}</Tag>
                   </div>
-                )}
-              </Card>
-            ),
-          }))}
+                  <Text>{r.content}</Text>
+                  {r.todos?.length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>📋 TODO：</Text>
+                      {r.todos.map(t => <div key={t.id} style={{ fontSize: 12, color: '#666' }}>• {t.title}</div>)}
+                    </div>
+                  )}
+                </Card>
+              ),
+            };
+          })}
         />
       )}
 
