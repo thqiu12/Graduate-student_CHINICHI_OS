@@ -6,6 +6,9 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import * as bcrypt from 'bcryptjs';
 import { authenticate } from '../middlewares/authenticate';
+
+// bcrypt 工作因子：2026 年基线为 12（每次 hash 约 ~250ms@现代 CPU）。
+const BCRYPT_COST = 12;
 import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, createError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
@@ -272,7 +275,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // 密码 bcrypt hash
-      const passwordHash = await bcrypt.hash(body.password, 10);
+      const passwordHash = await bcrypt.hash(body.password, BCRYPT_COST);
 
       // 使用事务创建用户和角色关联
       const newUser = await fastify.prisma.$transaction(async (tx) => {
@@ -392,7 +395,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
       if (body.phone !== undefined) updateData['phone'] = body.phone;
       if (body.isActive !== undefined) updateData['isActive'] = body.isActive;
       if (body.password !== undefined) {
-        updateData['passwordHash'] = await bcrypt.hash(body.password, 10);
+        updateData['passwordHash'] = await bcrypt.hash(body.password, BCRYPT_COST);
       }
 
       // 更新角色（如果提供了 roleCode）

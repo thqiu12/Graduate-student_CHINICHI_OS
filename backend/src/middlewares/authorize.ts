@@ -42,11 +42,18 @@ export function authorize(allowedRoles: RoleCode[]) {
     );
 
     if (!hasPermission) {
+      request.log.warn(
+        {
+          userId: user.sub,
+          userRoles: user.roles,
+          requiredRoles: allowedRoles,
+          path: request.url,
+        },
+        'RBAC 拒绝访问',
+      );
       reply.status(403).send({
         code: 'FORBIDDEN',
         message: '权限不足，无法访问此资源',
-        requiredRoles: allowedRoles,
-        userRoles: user.roles,
       });
       return;
     }

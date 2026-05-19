@@ -1,7 +1,11 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
+
+// 同时支持 PrismaClient 与 $transaction 回调里的 tx 客户端，
+// 让调用方可以把通知写入与主业务变更包进同一事务，保证原子性。
+export type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
 export async function createInAppNotification(
-  prisma: PrismaClient,
+  prisma: PrismaLike,
   data: {
     userId: string;
     type: string;

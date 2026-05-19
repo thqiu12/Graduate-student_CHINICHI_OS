@@ -71,9 +71,13 @@ interface PlanParams extends StudentParams {
   planId: string;
 }
 
-// ─── 辅助函数：写入操作日志 ──────────────────────────────
+// 事务客户端类型：兼容 prisma 与 $transaction 回调里的 tx
+type Tx = Prisma.TransactionClient;
+type Db = FastifyInstance['prisma'] | Tx;
+
+// ─── 辅助函数：写入操作日志（支持 tx 客户端）──────────────
 async function writeOperationLog(
-  fastify: FastifyInstance,
+  db: Db,
   options: {
     studentId: string;
     actorId: string;
@@ -84,7 +88,7 @@ async function writeOperationLog(
     detail?: any;
   },
 ): Promise<void> {
-  await fastify.prisma.operationLog.create({
+  await db.operationLog.create({
     data: {
       studentId: options.studentId,
       actorId: options.actorId,
@@ -98,11 +102,11 @@ async function writeOperationLog(
 }
 
 async function ensureNoPendingPlanChange(
-  fastify: FastifyInstance,
+  db: Db,
   studentId: string,
   sourcePlanId: string,
 ): Promise<void> {
-  const pendingPlan = await fastify.prisma.periodPlan.findFirst({
+  const pendingPlan = await db.periodPlan.findFirst({
     where: {
       studentId,
       previousPlanId: sourcePlanId,
@@ -193,57 +197,64 @@ async function createTaskChangePlan(
   },
 ) {
   const { studentId, sourcePlan, user, changeReason, tasks, detail } = options;
-  await ensureNoPendingPlanChange(fastify, studentId, sourcePlan.id);
 
-  const latestPlan = await fastify.prisma.periodPlan.findFirst({
-    where: { studentId, periodCode: sourcePlan.periodCode },
-    orderBy: { version: 'desc' },
-  });
-  const newVersion = (latestPlan?.version ?? sourcePlan.version) + 1;
+  // 把"查重 → 取最新版本号 → 创建 change_pending → 通知 → 写日志"
+  // 全部放进同一事务，避免任一步骤失败造成状态/通知/审计不一致。
+  // 残余风险：READ COMMITTED 隔离级别下两个并发事务仍可能同时通过 ensureNoPendingPlanChange；
+  // 推荐在 (previousPlanId) where status='change_pending' 上加唯一索引彻底消除（需迁移）。
+  return fastify.prisma.$transaction(async (tx) => {
+    await ensureNoPendingPlanChange(tx, studentId, sourcePlan.id);
 
-  const newPlan = await fastify.prisma.periodPlan.create({
-    data: {
-      studentId,
-      periodCode: sourcePlan.periodCode,
-      stageName: sourcePlan.stageName,
-      goal: sourcePlan.goal,
-      startDate: sourcePlan.startDate,
-      endDate: sourcePlan.endDate,
-      version: newVersion,
-      status: PlanStatus.change_pending,
-      changeReason,
-      previousPlanId: sourcePlan.id,
-      createdBy: user.sub,
-      tasks: { create: tasks },
-    },
-    include: { tasks: true },
-  });
-
-  const studentRecord = await fastify.prisma.student.findUnique({
-    where: { id: studentId },
-  });
-
-  if (studentRecord) {
-    await createInAppNotification(fastify.prisma, {
-      userId: studentRecord.userId,
-      type: 'plan_change_pending',
-      title: '规划任务已更新，需要重新确认',
-      content: `班主任对「${sourcePlan.stageName}」规划任务进行了调整，请查看变更内容并确认。`,
-      relatedId: newPlan.id,
+    const latestPlan = await tx.periodPlan.findFirst({
+      where: { studentId, periodCode: sourcePlan.periodCode },
+      orderBy: { version: 'desc' },
     });
-  }
+    const newVersion = (latestPlan?.version ?? sourcePlan.version) + 1;
 
-  await writeOperationLog(fastify, {
-    studentId,
-    actorId: user.sub,
-    actorName: user.name,
-    actionType: 'plan_task_change',
-    targetType: 'period_plan',
-    targetId: newPlan.id,
-    detail,
+    const newPlan = await tx.periodPlan.create({
+      data: {
+        studentId,
+        periodCode: sourcePlan.periodCode,
+        stageName: sourcePlan.stageName,
+        goal: sourcePlan.goal,
+        startDate: sourcePlan.startDate,
+        endDate: sourcePlan.endDate,
+        version: newVersion,
+        status: PlanStatus.change_pending,
+        changeReason,
+        previousPlanId: sourcePlan.id,
+        createdBy: user.sub,
+        tasks: { create: tasks },
+      },
+      include: { tasks: true },
+    });
+
+    const studentRecord = await tx.student.findUnique({
+      where: { id: studentId },
+    });
+
+    if (studentRecord) {
+      await createInAppNotification(tx, {
+        userId: studentRecord.userId,
+        type: 'plan_change_pending',
+        title: '规划任务已更新，需要重新确认',
+        content: `班主任对「${sourcePlan.stageName}」规划任务进行了调整，请查看变更内容并确认。`,
+        relatedId: newPlan.id,
+      });
+    }
+
+    await writeOperationLog(tx, {
+      studentId,
+      actorId: user.sub,
+      actorName: user.name,
+      actionType: 'plan_task_change',
+      targetType: 'period_plan',
+      targetId: newPlan.id,
+      detail,
+    });
+
+    return newPlan;
   });
-
-  return newPlan;
 }
 
 // ─── 路由注册函数 ─────────────────────────────────────────
@@ -363,7 +374,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       // 写入操作日志
-      await writeOperationLog(fastify, {
+      await writeOperationLog(fastify.prisma, {
         studentId,
         actorId: user.sub,
         actorName: user.name,
@@ -414,44 +425,48 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         throw createError.planStatus(plan.status, 'draft');
       }
 
-      // 更新规划状态为待确认
-      const updatedPlan = await fastify.prisma.periodPlan.update({
-        where: { id: planId },
-        data: {
-          status: PlanStatus.pending,
-          sentAt: new Date(),
-        },
-      });
-
-      // 创建站内通知给学生
-      const studentUser = await fastify.prisma.student.findUnique({
-        where: { id: studentId },
-        include: { user: true },
-      });
-
-      if (studentUser) {
-        await createInAppNotification(fastify.prisma, {
-          userId: studentUser.userId,
-          type: 'plan_pending',
-          title: '新阶段规划待确认',
-          content: `班主任为你制定了「${plan.stageName}」的阶段规划，请查看并确认。`,
-          relatedId: planId,
+      // 状态变更、通知、操作日志放进同一事务,任一失败整体回滚;
+      // 状态使用 updateMany + 当前状态守卫,防止并发 send 同时通过非原子的 read-check-update 串入。
+      const sentAt = new Date();
+      const updatedPlan = await fastify.prisma.$transaction(async (tx) => {
+        const result = await tx.periodPlan.updateMany({
+          where: { id: planId, status: PlanStatus.draft },
+          data: { status: PlanStatus.pending, sentAt },
         });
-      }
+        if (result.count !== 1) {
+          throw createError.planStatus(plan.status, 'draft');
+        }
 
-      // 写入操作日志
-      await writeOperationLog(fastify, {
-        studentId,
-        actorId: user.sub,
-        actorName: user.name,
-        actionType: 'plan_send',
-        targetType: 'period_plan',
-        targetId: planId,
-        detail: {
-          planVersion: plan.version,
-          stageName: plan.stageName,
-          sentAt: updatedPlan.sentAt,
-        } as unknown as Prisma.InputJsonValue,
+        const studentUser = await tx.student.findUnique({
+          where: { id: studentId },
+          include: { user: true },
+        });
+
+        if (studentUser) {
+          await createInAppNotification(tx, {
+            userId: studentUser.userId,
+            type: 'plan_pending',
+            title: '新阶段规划待确认',
+            content: `班主任为你制定了「${plan.stageName}」的阶段规划，请查看并确认。`,
+            relatedId: planId,
+          });
+        }
+
+        await writeOperationLog(tx, {
+          studentId,
+          actorId: user.sub,
+          actorName: user.name,
+          actionType: 'plan_send',
+          targetType: 'period_plan',
+          targetId: planId,
+          detail: {
+            planVersion: plan.version,
+            stageName: plan.stageName,
+            sentAt,
+          } as unknown as Prisma.InputJsonValue,
+        });
+
+        return tx.periodPlan.findUniqueOrThrow({ where: { id: planId } });
       });
 
       return reply.send({ data: updatedPlan, message: '规划已发送给学生确认' });
@@ -514,14 +529,24 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           });
         }
 
-        const confirmedPlan = await tx.periodPlan.update({
-          where: { id: planId },
+        // 用 updateMany + 当前合法状态守卫,防止并发 confirm/reject 抢跑后被重复"确认"
+        const confirmResult = await tx.periodPlan.updateMany({
+          where: {
+            id: planId,
+            status: { in: [PlanStatus.pending, PlanStatus.change_pending] },
+          },
           data: {
             status: PlanStatus.active,
             confirmedAt: now,
             confirmedBy: user.sub,
           },
         });
+        if (confirmResult.count !== 1) {
+          throw new AppError(
+            ErrorCode.PLAN_CANNOT_CONFIRM,
+            '规划状态已发生变化，请刷新后重试',
+          );
+        }
 
         await tx.planConfirmation.create({
           data: {
@@ -532,22 +557,21 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           },
         });
 
-        return confirmedPlan;
-      });
+        await writeOperationLog(tx, {
+          studentId,
+          actorId: user.sub,
+          actorName: user.name,
+          actionType: 'plan_confirm',
+          targetType: 'period_plan',
+          targetId: planId,
+          detail: {
+            planVersion: plan.version,
+            stageName: plan.stageName,
+            confirmedAt: now,
+          } as unknown as Prisma.InputJsonValue,
+        });
 
-      // 写入操作日志
-      await writeOperationLog(fastify, {
-        studentId,
-        actorId: user.sub,
-        actorName: user.name,
-        actionType: 'plan_confirm',
-        targetType: 'period_plan',
-        targetId: planId,
-        detail: {
-          planVersion: plan.version,
-          stageName: plan.stageName,
-          confirmedAt: now,
-        } as unknown as Prisma.InputJsonValue,
+        return tx.periodPlan.findUniqueOrThrow({ where: { id: planId } });
       });
 
       return reply.send({ data: updatedPlan, message: '规划已确认，开始执行！' });
@@ -599,45 +623,45 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         );
       }
 
-      // 记录异议
-      await fastify.prisma.planConfirmation.create({
-        data: {
-          planId,
-          action: 'reject',
-          actorId: user.sub,
-          content: parsed.data.content,
-        },
-      });
-
-      // 通知班主任
-      const teacherRelation = await fastify.prisma.studentTeacher.findFirst({
-        where: { studentId, endedAt: null },
-        include: { teacher: true },
-      });
-
-      if (teacherRelation) {
-        await createInAppNotification(fastify.prisma, {
-          userId: teacherRelation.teacherId,
-          type: 'plan_rejected',
-          title: '学生对规划提出异议',
-          content: `学生对「${plan.stageName}」规划提出异议：${parsed.data.content}`,
-          relatedId: studentId,
+      // 异议记录 + 通知班主任 + 操作日志,三步原子化
+      await fastify.prisma.$transaction(async (tx) => {
+        await tx.planConfirmation.create({
+          data: {
+            planId,
+            action: 'reject',
+            actorId: user.sub,
+            content: parsed.data.content,
+          },
         });
-      }
 
-      // 写入操作日志
-      await writeOperationLog(fastify, {
-        studentId,
-        actorId: user.sub,
-        actorName: user.name,
-        actionType: 'plan_reject',
-        targetType: 'period_plan',
-        targetId: planId,
-        detail: {
-          planVersion: plan.version,
-          stageName: plan.stageName,
-          rejectContent: parsed.data.content,
-        } as unknown as Prisma.InputJsonValue,
+        const teacherRelation = await tx.studentTeacher.findFirst({
+          where: { studentId, endedAt: null },
+          include: { teacher: true },
+        });
+
+        if (teacherRelation) {
+          await createInAppNotification(tx, {
+            userId: teacherRelation.teacherId,
+            type: 'plan_rejected',
+            title: '学生对规划提出异议',
+            content: `学生对「${plan.stageName}」规划提出异议：${parsed.data.content}`,
+            relatedId: studentId,
+          });
+        }
+
+        await writeOperationLog(tx, {
+          studentId,
+          actorId: user.sub,
+          actorName: user.name,
+          actionType: 'plan_reject',
+          targetType: 'period_plan',
+          targetId: planId,
+          detail: {
+            planVersion: plan.version,
+            stageName: plan.stageName,
+            rejectContent: parsed.data.content,
+          } as unknown as Prisma.InputJsonValue,
+        });
       });
 
       return reply.send({ message: '异议已提交，班主任将与你重新协商' });
@@ -680,70 +704,82 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         throw createError.planStatus(plan.status, 'active');
       }
 
-      // 创建新版本规划（change_pending 状态）
+      // 创建变更草稿、通知、操作日志包进同一事务,
+      // 并在事务内复查 active + 无 change_pending,防止并发重复变更。
       const newVersion = plan.version + 1;
-      const newPlan = await fastify.prisma.periodPlan.create({
-        data: {
-          studentId,
-          periodCode: plan.periodCode,
-          stageName: body.stageName ?? plan.stageName,
-          goal: body.goal ?? plan.goal,
-          startDate: body.startDate ? new Date(body.startDate) : plan.startDate,
-          endDate: body.endDate ? new Date(body.endDate) : plan.endDate,
-          version: newVersion,
-          status: PlanStatus.change_pending,
-          changeReason: body.changeReason,
-          previousPlanId: planId,
-          createdBy: user.sub,
-          tasks: {
-            create: plan.tasks.map((t) => ({
-              title: t.title,
-              description: t.description ?? undefined,
-              dueDate: t.dueDate ?? undefined,
-              dueTime: t.dueTime ?? undefined,
-              priority: t.priority,
-              repeatType: t.repeatType,
-              sortOrder: t.sortOrder,
-            })),
-          },
-        },
-        include: { tasks: true },
-      });
-
-      // 通知学生
-      const studentRecord = await fastify.prisma.student.findUnique({
-        where: { id: studentId },
-      });
-
-      if (studentRecord) {
-        await createInAppNotification(fastify.prisma, {
-          userId: studentRecord.userId,
-          type: 'plan_change_pending',
-          title: '规划已更新，需要重新确认',
-          content: `班主任对「${plan.stageName}」规划进行了调整，请查看变更内容并确认。`,
-          relatedId: newPlan.id,
+      const newPlan = await fastify.prisma.$transaction(async (tx) => {
+        const stillActive = await tx.periodPlan.findFirst({
+          where: { id: planId, studentId, status: PlanStatus.active },
+          select: { id: true },
         });
-      }
+        if (!stillActive) {
+          throw createError.planStatus(plan.status, 'active');
+        }
+        await ensureNoPendingPlanChange(tx, studentId, planId);
 
-      // 写入操作日志
-      await writeOperationLog(fastify, {
-        studentId,
-        actorId: user.sub,
-        actorName: user.name,
-        actionType: 'plan_change',
-        targetType: 'period_plan',
-        targetId: newPlan.id,
-        detail: {
-          previousPlanId: planId,
-          previousVersion: plan.version,
-          newVersion,
-          changeReason: body.changeReason,
-          changes: {
-            stageName: body.stageName,
-            startDate: body.startDate,
-            endDate: body.endDate,
+        const created = await tx.periodPlan.create({
+          data: {
+            studentId,
+            periodCode: plan.periodCode,
+            stageName: body.stageName ?? plan.stageName,
+            goal: body.goal ?? plan.goal,
+            startDate: body.startDate ? new Date(body.startDate) : plan.startDate,
+            endDate: body.endDate ? new Date(body.endDate) : plan.endDate,
+            version: newVersion,
+            status: PlanStatus.change_pending,
+            changeReason: body.changeReason,
+            previousPlanId: planId,
+            createdBy: user.sub,
+            tasks: {
+              create: plan.tasks.map((t) => ({
+                title: t.title,
+                description: t.description ?? undefined,
+                dueDate: t.dueDate ?? undefined,
+                dueTime: t.dueTime ?? undefined,
+                priority: t.priority,
+                repeatType: t.repeatType,
+                sortOrder: t.sortOrder,
+              })),
+            },
           },
-        } as unknown as Prisma.InputJsonValue,
+          include: { tasks: true },
+        });
+
+        const studentRecord = await tx.student.findUnique({
+          where: { id: studentId },
+        });
+
+        if (studentRecord) {
+          await createInAppNotification(tx, {
+            userId: studentRecord.userId,
+            type: 'plan_change_pending',
+            title: '规划已更新，需要重新确认',
+            content: `班主任对「${plan.stageName}」规划进行了调整，请查看变更内容并确认。`,
+            relatedId: created.id,
+          });
+        }
+
+        await writeOperationLog(tx, {
+          studentId,
+          actorId: user.sub,
+          actorName: user.name,
+          actionType: 'plan_change',
+          targetType: 'period_plan',
+          targetId: created.id,
+          detail: {
+            previousPlanId: planId,
+            previousVersion: plan.version,
+            newVersion,
+            changeReason: body.changeReason,
+            changes: {
+              stageName: body.stageName,
+              startDate: body.startDate,
+              endDate: body.endDate,
+            },
+          } as unknown as Prisma.InputJsonValue,
+        });
+
+        return created;
       });
 
       return reply.status(201).send({
@@ -778,23 +814,29 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         throw createError.planStatus(plan.status, 'active');
       }
 
-      const updated = await fastify.prisma.periodPlan.update({
-        where: { id: planId },
-        data: { status: PlanStatus.completed },
-      });
-
-      await writeOperationLog(fastify, {
-        studentId,
-        actorId: user.sub,
-        actorName: user.name,
-        actionType: 'plan_complete',
-        targetType: 'period_plan',
-        targetId: planId,
-        detail: {
-          planVersion: plan.version,
-          stageName: plan.stageName,
-          completedAt: new Date().toISOString(),
-        } as unknown as Prisma.InputJsonValue,
+      const completedAtIso = new Date().toISOString();
+      const updated = await fastify.prisma.$transaction(async (tx) => {
+        const result = await tx.periodPlan.updateMany({
+          where: { id: planId, status: PlanStatus.active },
+          data: { status: PlanStatus.completed },
+        });
+        if (result.count !== 1) {
+          throw createError.planStatus(plan.status, 'active');
+        }
+        await writeOperationLog(tx, {
+          studentId,
+          actorId: user.sub,
+          actorName: user.name,
+          actionType: 'plan_complete',
+          targetType: 'period_plan',
+          targetId: planId,
+          detail: {
+            planVersion: plan.version,
+            stageName: plan.stageName,
+            completedAt: completedAtIso,
+          } as unknown as Prisma.InputJsonValue,
+        });
+        return tx.periodPlan.findUniqueOrThrow({ where: { id: planId } });
       });
 
       return reply.send({ data: updated, message: '阶段规划已完成' });
@@ -963,7 +1005,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
-      await writeOperationLog(fastify, {
+      await writeOperationLog(fastify.prisma, {
         studentId,
         actorId: user.sub,
         actorName: user.name,
@@ -1054,7 +1096,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
-      await writeOperationLog(fastify, {
+      await writeOperationLog(fastify.prisma, {
         studentId,
         actorId: user.sub,
         actorName: user.name,

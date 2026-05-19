@@ -13,6 +13,21 @@ import fs from 'fs';
 import { pipeline } from 'stream/promises';
 
 const UPLOAD_DIR = process.env['UPLOAD_DIR'] ?? path.resolve(process.cwd(), 'uploads');
+const UPLOAD_DIR_REAL = path.resolve(UPLOAD_DIR);
+
+/**
+ * 校验给定路径必须位于 UPLOAD_DIR 下，防止越权下载/读取宿主机其他文件。
+ * 即使 DB 中的 ossKey 被串改，也无法逃逸到 UPLOAD_DIR 之外。
+ */
+function assertWithinUploadDir(absPath: string): void {
+  const resolved = path.resolve(absPath);
+  const safeRoot = UPLOAD_DIR_REAL.endsWith(path.sep)
+    ? UPLOAD_DIR_REAL
+    : UPLOAD_DIR_REAL + path.sep;
+  if (resolved !== UPLOAD_DIR_REAL && !resolved.startsWith(safeRoot)) {
+    throw new AppError(ErrorCode.FORBIDDEN, '文件路径越权', 403);
+  }
+}
 const FILE_TYPES = [
   'research_plan',
   'transcript',
@@ -212,6 +227,8 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         throw new AppError(ErrorCode.NOT_FOUND, '文件不存在', 404);
       }
 
+      assertWithinUploadDir(version.ossKey);
+
       if (!fs.existsSync(version.ossKey)) {
         throw new AppError(ErrorCode.NOT_FOUND, '文件实体不存在，请联系管理员重新上传', 404);
       }
@@ -285,6 +302,12 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       for (const version of file.versions) {
+        try {
+          assertWithinUploadDir(version.ossKey);
+        } catch (err) {
+          fastify.log.warn({ err, fileId, versionId: version.id, ossKey: version.ossKey }, '跳过越权路径文件删除');
+          continue;
+        }
         if (fs.existsSync(version.ossKey)) {
           try {
             fs.unlinkSync(version.ossKey);

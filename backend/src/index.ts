@@ -5,6 +5,8 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
 
 // 插件
 import prismaPlugin from './plugins/prisma';
@@ -37,6 +39,8 @@ import { createWeeklySummaryDeptWorker } from './jobs/weekly-summary-dept.job';
 const PORT = parseInt(process.env['PORT'] ?? '3000', 10);
 const HOST = process.env['HOST'] ?? '0.0.0.0';
 const NODE_ENV = process.env['NODE_ENV'] ?? 'development';
+// 是否在响应体里暴露内部错误细节。仅在显式开启时为 true，避免 NODE_ENV 误配导致泄露。
+const EXPOSE_ERROR_DETAILS = process.env['EXPOSE_ERROR_DETAILS'] === 'true';
 
 /**
  * 构建 Fastify 应用实例
@@ -60,16 +64,35 @@ async function buildApp(): Promise<FastifyInstance> {
     },
   });
 
+  // ─── 安全头（Helmet）────────────────────────────────────
+  // 关闭 CSP 默认策略：前端是独立 SPA，CSP 需要随前端构建一起规划，此处先打开基础安全头
+  await fastify.register(helmet, {
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  });
+
   // ─── CORS ────────────────────────────────────────────────
+  // 开发环境不再使用 origin: true（防止 .env 误传到生产即放开全站）。
+  // 支持 CORS_ORIGIN 逗号分隔多域；保留 Vercel 预览域名匹配。
+  const corsOriginsEnv = process.env['CORS_ORIGIN'];
+  const corsAllowList: (string | RegExp)[] = corsOriginsEnv
+    ? corsOriginsEnv.split(',').map((s) => s.trim()).filter(Boolean)
+    : NODE_ENV === 'development'
+      ? ['http://localhost:5173', 'http://127.0.0.1:5173']
+      : ['https://chinichi.jp'];
+  corsAllowList.push(/\.vercel\.app$/);
   await fastify.register(cors, {
-    origin:
-      NODE_ENV === 'development'
-        ? true // 开发环境允许所有来源
-        : [
-            process.env['CORS_ORIGIN'] ?? 'https://chinichi.jp',
-            /\.vercel\.app$/, // 允许所有 Vercel 预览域名
-          ],
+    origin: corsAllowList,
     credentials: true,
+  });
+
+  // ─── 限流（防暴力穷举）──────────────────────────────────
+  // 全局默认：每 IP 每分钟 300 次；登录/发码等敏感路由在路由层加更严格的限制
+  await fastify.register(rateLimit, {
+    global: true,
+    max: 300,
+    timeWindow: '1 minute',
+    allowList: NODE_ENV === 'test' ? () => true : undefined,
   });
 
   // ─── Multipart（文件上传）────────────────────────────────
@@ -103,7 +126,7 @@ async function buildApp(): Promise<FastifyInstance> {
     fastify.log.error(error);
     return reply.status(500).send({
       code: 'INTERNAL_ERROR',
-      message: NODE_ENV === 'development' ? error.message : '服务器内部错误',
+      message: EXPOSE_ERROR_DETAILS ? error.message : '服务器内部错误',
     });
   });
 

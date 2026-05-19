@@ -56,8 +56,21 @@ async function generateTokens(
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
   // ─── POST /api/auth/login ─── 账号密码登录（手机号 + 密码）
+  // 路由级限流：按 IP 每 5 分钟最多 10 次，按 phone 每 5 分钟最多 10 次，防止暴力穷举
   fastify.post(
     '/auth/login',
+    {
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: '5 minutes',
+          keyGenerator: (req) => {
+            const body = (req.body as { phone?: string } | undefined) ?? {};
+            return `login:${req.ip}:${body.phone ?? ''}`;
+          },
+        },
+      },
+    },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const body = request.body as { phone: string; password: string };
 
@@ -119,6 +132,19 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /api/auth/send-sms - 发送短信验证码
   fastify.post<{ Body: { phone: string } }>(
     '/auth/send-sms',
+    {
+      // 路由级限流：每 IP+phone 每 15 分钟最多 5 次，防止短信轰炸
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: '15 minutes',
+          keyGenerator: (req) => {
+            const body = (req.body as { phone?: string } | undefined) ?? {};
+            return `send-sms:${req.ip}:${body.phone ?? ''}`;
+          },
+        },
+      },
+    },
     async (request: FastifyRequest<{ Body: { phone: string } }>, reply: FastifyReply) => {
       const parsed = sendSmsSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -132,9 +158,9 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       // 3. 调用阿里云短信 API 发送
       // 4. 记录发送频率（防刷：同一手机号 60s 内不重复发送）
 
-      // 开发环境模拟：固定验证码 123456
+      // 开发环境模拟：固定验证码 123456（验证码本身不写入日志，避免日志泄露）
       if (process.env['NODE_ENV'] === 'development') {
-        fastify.log.info(`[开发模式] 手机号 ${phone} 的验证码为: 123456`);
+        fastify.log.info({ phone }, '[开发模式] 已发放固定验证码（请见接口约定文档）');
         return reply.send({ message: '验证码已发送（开发模式）', expiresIn: 300 });
       }
 

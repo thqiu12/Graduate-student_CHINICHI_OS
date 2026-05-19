@@ -38,6 +38,28 @@ const authPlugin: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     throw new Error('JWT_SECRET 环境变量未设置');
   }
 
+  // JWT_SECRET 强度校验：生产环境必须 >= 32 字符,且禁止使用 .env.example 中的占位串
+  const MIN_SECRET_LENGTH = 32;
+  const PLACEHOLDER_SECRETS = new Set([
+    'your-super-secret-jwt-key-change-in-production',
+    'your-super-secret-key',
+    'secret',
+    'changeme',
+  ]);
+  const isProduction = process.env['NODE_ENV'] === 'production';
+  const tooShort = jwtSecret.length < MIN_SECRET_LENGTH;
+  const isPlaceholder = PLACEHOLDER_SECRETS.has(jwtSecret);
+  if (isProduction && (tooShort || isPlaceholder)) {
+    throw new Error(
+      `JWT_SECRET 不满足强度要求（生产环境需 ≥${MIN_SECRET_LENGTH} 字符且非占位值）`,
+    );
+  }
+  if (!isProduction && (tooShort || isPlaceholder)) {
+    fastify.log.warn(
+      `JWT_SECRET 强度不足（当前 ${jwtSecret.length} 字符），生产环境前请更换为 ≥${MIN_SECRET_LENGTH} 字符的随机字符串`,
+    );
+  }
+
   // 注册 JWT 插件
   await fastify.register(fastifyJwt, {
     secret: jwtSecret,
