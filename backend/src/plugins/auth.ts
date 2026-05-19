@@ -13,6 +13,7 @@ export interface JwtPayload {
   name: string;       // 用户姓名
   roles: string[];    // 角色列表
   type?: string;      // token 类型 (access / refresh)
+  jti?: string;       // JWT ID，用于精确撤销（Redis 黑名单 key）
   iat?: number;
   exp?: number;
 }

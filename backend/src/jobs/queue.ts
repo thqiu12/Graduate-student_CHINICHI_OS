@@ -4,32 +4,18 @@
 
 import { Queue, QueueOptions } from 'bullmq';
 import IORedis from 'ioredis';
-
-// ─── Redis 连接配置 ───────────────────────────────────────
-const redisUrl = process.env['REDIS_URL'] ?? 'redis://localhost:6379';
+import { getRedis, closeRedis } from '../utils/redis';
 
 /**
- * 创建共享的 Redis 连接（BullMQ 要求 lazyConnect: false）
+ * BullMQ 与 JWT 黑名单共享同一 Redis 单例（utils/redis.ts）。
+ * 保留 createRedisConnection 仅为向后兼容，已无新增调用方。
  */
 export function createRedisConnection(): IORedis {
-  const connection = new IORedis(redisUrl, {
-    maxRetriesPerRequest: null, // BullMQ 要求此配置
-    enableReadyCheck: false,
-  });
-
-  connection.on('error', (err) => {
-    console.error('[Redis] 连接错误:', err);
-  });
-
-  connection.on('connect', () => {
-    console.log('[Redis] 连接成功');
-  });
-
-  return connection;
+  return getRedis();
 }
 
 // 共享连接实例
-const sharedConnection = createRedisConnection();
+const sharedConnection = getRedis();
 
 const defaultQueueOptions: QueueOptions = {
   connection: sharedConnection,
@@ -127,7 +113,7 @@ export const allQueues = [
  */
 export async function closeAllQueues(): Promise<void> {
   await Promise.all(allQueues.map((q) => q.close()));
-  await sharedConnection.quit();
+  await closeRedis();
   console.log('[BullMQ] 所有队列已关闭');
 }
 

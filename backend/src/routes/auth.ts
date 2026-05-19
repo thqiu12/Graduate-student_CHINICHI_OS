@@ -5,7 +5,9 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import * as bcrypt from 'bcryptjs';
+import { randomUUID } from 'node:crypto';
 import { AppError, ErrorCode } from '../utils/errors';
+import { blacklistJti } from '../utils/redis';
 
 // ─── 请求体 Schema ───────────────────────────────────────
 const phoneLoginSchema = z.object({
@@ -30,7 +32,8 @@ type WechatLoginBody = z.infer<typeof wechatLoginSchema>;
 
 // ─── 辅助函数 ─────────────────────────────────────────────
 /**
- * 生成包含用户角色信息的 JWT Token
+ * 生成包含用户角色信息的 JWT Token。
+ * 每个 token 都带独立 jti（JWT ID），便于在 Redis 黑名单里精确撤销。
  */
 async function generateTokens(
   fastify: FastifyInstance,
@@ -38,18 +41,26 @@ async function generateTokens(
   userName: string,
   roles: string[],
 ): Promise<{ accessToken: string; refreshToken: string }> {
-  const payload = { sub: userId, name: userName, roles };
-
-  const accessToken = fastify.jwt.sign(payload, {
-    expiresIn: process.env['JWT_ACCESS_EXPIRES_IN'] ?? '2h',
-  });
+  const accessToken = fastify.jwt.sign(
+    { sub: userId, name: userName, roles, jti: randomUUID() } as any,
+    { expiresIn: process.env['JWT_ACCESS_EXPIRES_IN'] ?? '2h' },
+  );
 
   const refreshToken = fastify.jwt.sign(
-    { sub: userId, name: userName, roles, type: 'refresh' } as any,
+    { sub: userId, name: userName, roles, type: 'refresh', jti: randomUUID() } as any,
     { expiresIn: process.env['JWT_REFRESH_EXPIRES_IN'] ?? '30d' },
   );
 
   return { accessToken, refreshToken };
+}
+
+/**
+ * 计算 token 剩余 TTL（秒）。已过期返回 0。
+ */
+function ttlSecondsFromExp(exp: number | undefined): number {
+  if (!exp) return 0;
+  const now = Math.floor(Date.now() / 1000);
+  return Math.max(0, exp - now);
 }
 
 // ─── 路由注册函数 ─────────────────────────────────────────
@@ -290,9 +301,9 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         throw new AppError(ErrorCode.VALIDATION_ERROR, '参数错误');
       }
 
-      let payload: { sub: string; type?: string };
+      let payload: { sub: string; type?: string; jti?: string; exp?: number };
       try {
-        payload = fastify.jwt.verify<{ sub: string; type?: string }>(
+        payload = fastify.jwt.verify<{ sub: string; type?: string; jti?: string; exp?: number }>(
           parsed.data.refreshToken,
         );
       } catch (_err) {
@@ -301,6 +312,12 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
       if (payload.type !== 'refresh') {
         throw new AppError(ErrorCode.UNAUTHORIZED, '无效的 Token 类型');
+      }
+
+      // 若该 refresh token 已被撤销（拉黑），拒绝复用
+      const { isJtiBlacklisted } = await import('../utils/redis');
+      if (await isJtiBlacklisted(payload.jti)) {
+        throw new AppError(ErrorCode.UNAUTHORIZED, 'Refresh Token 已失效，请重新登录');
       }
 
       const user = await fastify.prisma.user.findUnique({
@@ -320,17 +337,49 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         roles,
       );
 
+      // 轮转：颁发新 token 后，把旧 refresh token 拉黑，杜绝复用
+      if (payload.jti) {
+        await blacklistJti(payload.jti, ttlSecondsFromExp(payload.exp));
+      }
+
       return reply.send({
         data: { accessToken, refreshToken: newRefreshToken },
       });
     },
   );
 
-  // POST /api/auth/logout - 登出（客户端清除 Token 即可，服务端可加入黑名单）
-  fastify.post(
+  // POST /api/auth/logout - 登出：撤销当前 access token + 提交的 refresh token
+  fastify.post<{ Body: { refreshToken?: string } }>(
     '/auth/logout',
-    async (_request: FastifyRequest, reply: FastifyReply) => {
-      // TODO: 将 Token 加入 Redis 黑名单（可选，按安全需求决定）
+    async (
+      request: FastifyRequest<{ Body: { refreshToken?: string } }>,
+      reply: FastifyReply,
+    ) => {
+      // 1) 撤销当前请求所带的 access token（Authorization Bearer 或 cookie）
+      try {
+        const decoded = await request.jwtVerify<{ jti?: string; exp?: number }>();
+        if (decoded?.jti) {
+          await blacklistJti(decoded.jti, ttlSecondsFromExp(decoded.exp));
+        }
+      } catch (_err) {
+        // access token 已过期或缺失也视为登出成功，无需报错
+      }
+
+      // 2) 撤销客户端主动提交的 refresh token
+      const refreshToken = request.body?.refreshToken;
+      if (refreshToken) {
+        try {
+          const decoded = fastify.jwt.verify<{ jti?: string; exp?: number; type?: string }>(
+            refreshToken,
+          );
+          if (decoded?.type === 'refresh' && decoded.jti) {
+            await blacklistJti(decoded.jti, ttlSecondsFromExp(decoded.exp));
+          }
+        } catch (_err) {
+          // 已过期/伪造的 refresh token 无需处理
+        }
+      }
+
       return reply.send({ message: '已登出' });
     },
   );
