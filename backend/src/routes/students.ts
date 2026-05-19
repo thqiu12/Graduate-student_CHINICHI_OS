@@ -9,6 +9,7 @@ import { authorize, Roles } from '../middlewares/authorize';
 import { AppError, createError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
 import { assertStudentAccess, buildStudentScopeWhere } from '../utils/access-control';
+import { createInAppNotification } from '../utils/notifications';
 
 // ─── 请求体 Schema ───────────────────────────────────────
 const createStudentSchema = z.object({
@@ -37,8 +38,16 @@ const listQuerySchema = z.object({
   riskTagCode: z.string().optional(),
   targetSeason: z.string().optional(),
   search: z.string().optional(),
+  // 'true' 时只返回当前没有 active 班主任的学生
+  unassigned: z.enum(['true', 'false']).optional(),
   page: z.string().optional().transform(Number).default('1'),
   pageSize: z.string().optional().transform(Number).default('20'),
+});
+
+const bulkAssignTeacherSchema = z.object({
+  studentIds: z.array(z.string().uuid()).min(1, '至少选择一个学生').max(100, '一次最多 100 个学生'),
+  teacherId: z.string().uuid(),
+  changeReason: z.string().optional(),
 });
 
 type CreateStudentBody = z.infer<typeof createStudentSchema>;
@@ -244,6 +253,10 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
         whereClause['user'] = {
           name: { contains: query.search, mode: 'insensitive' },
         };
+      }
+      if (query.unassigned === 'true') {
+        // 没有任何 endedAt=null 的 StudentTeacher 关系 = 未分配班主任
+        whereClause['teachers'] = { none: { endedAt: null } };
       }
 
       const page = isNaN(query.page) ? 1 : query.page;
@@ -813,6 +826,115 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(201).send({
         data: { imported: result.length },
         message: `成功导入 ${result.length} 名学生`,
+      });
+    },
+  );
+
+  // POST /api/students/bulk-assign-teacher - 批量分配/更换班主任
+  // 老板/学科负责人对一组学生统一指派一位班主任。
+  // 对每个学生:关闭旧关系 (endedAt=now)、建立新关系、写操作日志、给老师发通知。
+  fastify.post(
+    '/students/bulk-assign-teacher',
+    {
+      preHandler: [
+        authenticate,
+        authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD]),
+      ],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const parsed = bulkAssignTeacherSchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, '参数错误', parsed.error.flatten());
+      }
+      const { studentIds, teacherId, changeReason } = parsed.data;
+
+      await assertTeacherUser(fastify, teacherId);
+
+      // 鉴权:每个学生都要在当前用户可访问范围内
+      for (const sid of studentIds) {
+        await assertStudentAccess(fastify, user, sid);
+      }
+
+      const now = new Date();
+      const result = await fastify.prisma.$transaction(async (tx) => {
+        const summary: Array<{ studentId: string; previousTeacherId: string | null; assigned: boolean }> = [];
+
+        for (const sid of studentIds) {
+          // 当前 active 班主任（用于审计/通知)
+          const current = await tx.studentTeacher.findFirst({
+            where: { studentId: sid, endedAt: null },
+            select: { teacherId: true },
+          });
+          const previousTeacherId = current?.teacherId ?? null;
+
+          // 已是目标班主任 → 跳过
+          if (previousTeacherId === teacherId) {
+            summary.push({ studentId: sid, previousTeacherId, assigned: false });
+            continue;
+          }
+
+          // 关闭所有旧 active 关系
+          await tx.studentTeacher.updateMany({
+            where: { studentId: sid, endedAt: null },
+            data: { endedAt: now },
+          });
+
+          // 建立新关系
+          await tx.studentTeacher.create({
+            data: {
+              studentId: sid,
+              teacherId,
+              startedAt: now,
+              changedBy: user.sub,
+              changeReason: changeReason ?? '批量分配',
+            },
+          });
+
+          await tx.operationLog.create({
+            data: {
+              studentId: sid,
+              actorId: user.sub,
+              actorName: user.name,
+              actionType: previousTeacherId ? 'teacher_change' : 'teacher_assign',
+              targetType: 'student_teacher',
+              targetId: sid,
+              detail: {
+                previousTeacherId,
+                newTeacherId: teacherId,
+                changeReason: changeReason ?? '批量分配',
+              } as any,
+            },
+          });
+
+          summary.push({ studentId: sid, previousTeacherId, assigned: true });
+        }
+
+        return summary;
+      });
+
+      // 给新班主任发一条聚合通知(在事务外,失败不影响主流程)
+      const assignedCount = result.filter((r) => r.assigned).length;
+      if (assignedCount > 0) {
+        try {
+          await createInAppNotification(fastify.prisma, {
+            userId: teacherId,
+            type: 'teacher_assigned',
+            title: `你被分配了 ${assignedCount} 名学生`,
+            content: `${user.name} 通过批量分配为你指派了 ${assignedCount} 名学生。`,
+          });
+        } catch (err) {
+          fastify.log.warn({ err, teacherId, assignedCount }, '批量分配后通知失败');
+        }
+      }
+
+      return reply.send({
+        data: {
+          assigned: assignedCount,
+          skipped: result.length - assignedCount,
+          details: result,
+        },
+        message: `成功分配 ${assignedCount} 名学生${result.length - assignedCount > 0 ? `，${result.length - assignedCount} 名已是该班主任` : ''}`,
       });
     },
   );

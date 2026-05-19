@@ -87,3 +87,27 @@ export function useCreateStudent() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['students'] }),
   });
 }
+
+// 批量分配/更换班主任
+export interface BulkAssignTeacherBody {
+  studentIds: string[];
+  teacherId: string;
+  changeReason?: string;
+}
+export function useBulkAssignTeacher() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: BulkAssignTeacherBody) => {
+      const res = await apiClient.post('/students/bulk-assign-teacher', body);
+      return res.data as {
+        data: {
+          assigned: number;
+          skipped: number;
+          details: Array<{ studentId: string; previousTeacherId: string | null; assigned: boolean }>;
+        };
+        message: string;
+      };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['students'] }),
+  });
+}
