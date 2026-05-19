@@ -1,5 +1,6 @@
 // src/routes/files.ts
 // 知日塾大学院考学进度管理系统 - 文件管理路由
+// 存储后端通过 utils/storage 适配:本地盘(dev) 或 阿里云 OSS(生产)
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { authenticate } from '../middlewares/authenticate';
@@ -9,25 +10,9 @@ import { JwtPayload } from '../plugins/auth';
 import { assertStudentAccess } from '../utils/access-control';
 import { Prisma } from '@prisma/client';
 import path from 'path';
-import fs from 'fs';
-import { pipeline } from 'stream/promises';
+import { randomUUID } from 'node:crypto';
+import { getStorage } from '../utils/storage';
 
-const UPLOAD_DIR = process.env['UPLOAD_DIR'] ?? path.resolve(process.cwd(), 'uploads');
-const UPLOAD_DIR_REAL = path.resolve(UPLOAD_DIR);
-
-/**
- * 校验给定路径必须位于 UPLOAD_DIR 下，防止越权下载/读取宿主机其他文件。
- * 即使 DB 中的 ossKey 被串改，也无法逃逸到 UPLOAD_DIR 之外。
- */
-function assertWithinUploadDir(absPath: string): void {
-  const resolved = path.resolve(absPath);
-  const safeRoot = UPLOAD_DIR_REAL.endsWith(path.sep)
-    ? UPLOAD_DIR_REAL
-    : UPLOAD_DIR_REAL + path.sep;
-  if (resolved !== UPLOAD_DIR_REAL && !resolved.startsWith(safeRoot)) {
-    throw new AppError(ErrorCode.FORBIDDEN, '文件路径越权', 403);
-  }
-}
 const FILE_TYPES = [
   'research_plan',
   'transcript',
@@ -75,12 +60,10 @@ function serializeFile(file: FileWithRelations) {
   };
 }
 
-// 确保上传目录存在
-if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-}
-
 export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
+  const storage = getStorage();
+  fastify.log.info({ driver: storage.driver }, '文件存储驱动已就绪');
+
   // GET /api/students/:id/files
   fastify.get(
     '/students/:id/files',
@@ -98,7 +81,6 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
-      // 按 fileType 分组
       const grouped: Record<string, ReturnType<typeof serializeFile>[]> = {};
       for (const ft of FILE_TYPES) {
         grouped[ft] = [];
@@ -124,13 +106,13 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       const student = await fastify.prisma.student.findUnique({ where: { id } });
       if (!student) throw new AppError(ErrorCode.NOT_FOUND, '学生不存在', 404);
 
+      // 1) 解析 multipart,把文件读成 Buffer(已经有 50MB 上限,见 index.ts)
       const parts = request.parts();
       let fileType = 'other';
       let description = '';
-      let savedPath = '';
       let originalName = '';
-      let fileSize = 0;
       let mimeType = '';
+      let buffer: Buffer | null = null;
 
       for await (const part of parts) {
         if (part.type === 'field') {
@@ -142,23 +124,19 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
           }
         } else if (part.type === 'file') {
           originalName = part.filename;
-          const ext = path.extname(originalName);
-          const safeName = `${id}_${Date.now()}${ext}`;
-          savedPath = path.join(UPLOAD_DIR, safeName);
           mimeType = part.mimetype;
-          const writeStream = fs.createWriteStream(savedPath);
-          await pipeline(part.file, writeStream);
-          fileSize = fs.statSync(savedPath).size;
+          buffer = await part.toBuffer();
         }
       }
 
-      if (!savedPath) throw new AppError(ErrorCode.VALIDATION_ERROR, '未上传文件', 400);
+      if (!buffer || !originalName) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, '未上传文件', 400);
+      }
       if (user.roles.includes(Roles.STUDENT) && !STUDENT_UPLOAD_TYPES.includes(fileType)) {
-        if (fs.existsSync(savedPath)) fs.unlinkSync(savedPath);
         throw new AppError(ErrorCode.FILE_TYPE_NOT_ALLOWED, '学生不能上传该类型文件');
       }
 
-      // 计算版本号（research_plan 累加）
+      // 2) 计算版本号(research_plan 累加)
       let versionNo = 1;
       if (fileType === 'research_plan') {
         const existing = await fastify.prisma.file.count({
@@ -167,26 +145,47 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         versionNo = existing + 1;
       }
 
+      // 3) 落存储 → 落 DB。put 失败直接抛出;DB 写失败则同步把刚写入的对象删除以免泄漏。
+      const ext = path.extname(originalName);
+      const fileId = randomUUID();
+      const putResult = await storage.put({
+        studentId: id,
+        fileId,
+        ext,
+        mimeType,
+        body: buffer,
+      });
+
       const displayName = description || originalName;
-      const file = await fastify.prisma.file.create({
-        data: {
-          studentId: id,
-          fileType,
-          displayName,
-          uploadedBy: user.sub,
-          versions: {
-            create: {
-              versionNo,
-              ossKey: savedPath,
-              fileSize: BigInt(fileSize),
-              mimeType,
-              uploadedBy: user.sub,
-              notes: description || undefined,
+      let file: FileWithRelations;
+      try {
+        file = await fastify.prisma.file.create({
+          data: {
+            id: fileId,
+            studentId: id,
+            fileType,
+            displayName,
+            uploadedBy: user.sub,
+            versions: {
+              create: {
+                versionNo,
+                ossKey: putResult.storageKey,
+                fileSize: BigInt(putResult.size),
+                mimeType,
+                uploadedBy: user.sub,
+                notes: description || undefined,
+              },
             },
           },
-        },
-        include: { versions: true, uploader: { select: { name: true } } },
-      });
+          include: { versions: true, uploader: { select: { name: true } } },
+        });
+      } catch (err) {
+        // DB 失败 → 回滚刚写入存储的对象,避免成"孤儿文件"
+        await storage.delete(putResult.storageKey).catch((cleanupErr) => {
+          fastify.log.warn({ cleanupErr, key: putResult.storageKey }, '回滚孤儿文件失败');
+        });
+        throw err;
+      }
 
       await fastify.prisma.operationLog.create({
         data: {
@@ -227,12 +226,6 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         throw new AppError(ErrorCode.NOT_FOUND, '文件不存在', 404);
       }
 
-      assertWithinUploadDir(version.ossKey);
-
-      if (!fs.existsSync(version.ossKey)) {
-        throw new AppError(ErrorCode.NOT_FOUND, '文件实体不存在，请联系管理员重新上传', 404);
-      }
-
       const user = request.user as JwtPayload;
       await fastify.prisma.operationLog.create({
         data: {
@@ -251,11 +244,23 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
+      const got = await storage.get(version.ossKey, file.displayName);
+      // OSS: 302 到带签名的临时 URL,客户端直连下载,省后端带宽
+      if (got.signedUrl) {
+        return reply.redirect(302, got.signedUrl);
+      }
+      // 本地: 直接流回
       return reply
         .header('Content-Type', version.mimeType ?? 'application/octet-stream')
-        .header('Content-Length', version.fileSize?.toString() ?? undefined)
-        .header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.displayName)}`)
-        .send(fs.createReadStream(version.ossKey));
+        .header(
+          'Content-Length',
+          (version.fileSize ?? got.contentLength ?? '')?.toString() ?? undefined,
+        )
+        .header(
+          'Content-Disposition',
+          `attachment; filename*=UTF-8''${encodeURIComponent(file.displayName)}`,
+        )
+        .send(got.stream);
     },
   );
 
@@ -301,19 +306,12 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         });
       });
 
+      // DB 行已删,再清理对象;失败只记录日志,不影响响应。
       for (const version of file.versions) {
         try {
-          assertWithinUploadDir(version.ossKey);
+          await storage.delete(version.ossKey);
         } catch (err) {
-          fastify.log.warn({ err, fileId, versionId: version.id, ossKey: version.ossKey }, '跳过越权路径文件删除');
-          continue;
-        }
-        if (fs.existsSync(version.ossKey)) {
-          try {
-            fs.unlinkSync(version.ossKey);
-          } catch (err) {
-            fastify.log.warn({ err, fileId, versionId: version.id }, '文件实体删除失败');
-          }
+          fastify.log.warn({ err, fileId, versionId: version.id }, '文件实体删除失败');
         }
       }
 
