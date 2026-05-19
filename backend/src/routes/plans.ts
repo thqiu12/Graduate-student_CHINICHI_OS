@@ -75,6 +75,41 @@ interface PlanParams extends StudentParams {
 type Tx = Prisma.TransactionClient;
 type Db = FastifyInstance['prisma'] | Tx;
 
+/**
+ * 在事务里执行 fn，捕获 Prisma P2002（唯一约束冲突）后重试。
+ * 用于 PeriodPlan.version 的并发分配 —— 两个请求同时读到相同 max(version)
+ * 时只有一个能 INSERT 成功，另一个 P2002 抛错；fn 内部应当在每次重试时
+ * 重新查 max(version)+1，从而拿到下一个可用版本号。
+ */
+async function withVersionRetry<T>(
+  fastify: FastifyInstance,
+  fn: (tx: Tx) => Promise<T>,
+  ctx: { studentId: string; periodCode?: string },
+  maxAttempts = 5,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await fastify.prisma.$transaction(fn);
+    } catch (err) {
+      lastErr = err;
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        attempt < maxAttempts
+      ) {
+        fastify.log.warn({ ...ctx, attempt }, '规划版本号并发冲突，重试');
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr ?? new AppError(
+    ErrorCode.VALIDATION_ERROR,
+    '规划版本分配冲突，请稍后重试',
+  );
+}
+
 // ─── 辅助函数：写入操作日志（支持 tx 客户端）──────────────
 async function writeOperationLog(
   db: Db,
@@ -200,9 +235,12 @@ async function createTaskChangePlan(
 
   // 把"查重 → 取最新版本号 → 创建 change_pending → 通知 → 写日志"
   // 全部放进同一事务，避免任一步骤失败造成状态/通知/审计不一致。
-  // 残余风险：READ COMMITTED 隔离级别下两个并发事务仍可能同时通过 ensureNoPendingPlanChange；
-  // 推荐在 (previousPlanId) where status='change_pending' 上加唯一索引彻底消除（需迁移）。
-  return fastify.prisma.$transaction(async (tx) => {
+  // 用 withVersionRetry 包一层：READ COMMITTED 下两个并发请求可能同时读到
+  // 相同 max(version)，让 INSERT 时唯一约束(@@unique studentId+periodCode+version)
+  // 直接拒绝其中一方，捕获 P2002 后重试，每次重试都重读 max(version)。
+  // 残余风险：ensureNoPendingPlanChange 仍可能让两个并发请求都通过；
+  // 推荐在 (previousPlanId) where status='change_pending' 上加部分唯一索引彻底消除（需迁移）。
+  return withVersionRetry(fastify, async (tx) => {
     await ensureNoPendingPlanChange(tx, studentId, sourcePlan.id);
 
     const latestPlan = await tx.periodPlan.findFirst({
@@ -254,7 +292,7 @@ async function createTaskChangePlan(
     });
 
     return newPlan;
-  });
+  }, { studentId, periodCode: sourcePlan.periodCode });
 }
 
 // ─── 路由注册函数 ─────────────────────────────────────────
@@ -339,57 +377,60 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         throw createError.studentNotFound(studentId);
       }
 
-      // 查找同阶段当前最大版本号
-      const existingPlan = await fastify.prisma.periodPlan.findFirst({
-        where: { studentId, periodCode: body.periodCode },
-        orderBy: { version: 'desc' },
-      });
-      const newVersion = (existingPlan?.version ?? 0) + 1;
+      // 在事务里分配版本号 + 创建 + 写日志，并对 P2002 自动重试。
+      // 避免两个并发 create 都读到相同 max(version) 然后 INSERT 撞 unique 约束。
+      const plan = await withVersionRetry(fastify, async (tx) => {
+        const existingPlan = await tx.periodPlan.findFirst({
+          where: { studentId, periodCode: body.periodCode },
+          orderBy: { version: 'desc' },
+        });
+        const newVersion = (existingPlan?.version ?? 0) + 1;
 
-      // 创建规划（草稿状态）
-      const plan = await fastify.prisma.periodPlan.create({
-        data: {
-          studentId,
-          periodCode: body.periodCode,
-          stageName: body.stageName,
-          goal: body.goal,
-          startDate: new Date(body.startDate),
-          endDate: new Date(body.endDate),
-          version: newVersion,
-          status: PlanStatus.draft,
-          createdBy: user.sub,
-          tasks: {
-            create: body.tasks.map((t, idx) => ({
-              title: t.title,
-              description: t.description,
-              dueDate: t.dueDate ? new Date(t.dueDate) : undefined,
-              dueTime: t.dueTime,
-              priority: t.priority,
-              repeatType: t.repeatType,
-              sortOrder: t.sortOrder ?? idx,
-            })),
+        const created = await tx.periodPlan.create({
+          data: {
+            studentId,
+            periodCode: body.periodCode,
+            stageName: body.stageName,
+            goal: body.goal,
+            startDate: new Date(body.startDate),
+            endDate: new Date(body.endDate),
+            version: newVersion,
+            status: PlanStatus.draft,
+            createdBy: user.sub,
+            tasks: {
+              create: body.tasks.map((t, idx) => ({
+                title: t.title,
+                description: t.description,
+                dueDate: t.dueDate ? new Date(t.dueDate) : undefined,
+                dueTime: t.dueTime,
+                priority: t.priority,
+                repeatType: t.repeatType,
+                sortOrder: t.sortOrder ?? idx,
+              })),
+            },
           },
-        },
-        include: { tasks: true },
-      });
+          include: { tasks: true },
+        });
 
-      // 写入操作日志
-      await writeOperationLog(fastify.prisma, {
-        studentId,
-        actorId: user.sub,
-        actorName: user.name,
-        actionType: 'plan_create',
-        targetType: 'period_plan',
-        targetId: plan.id,
-        detail: {
-          periodCode: plan.periodCode,
-          stageName: plan.stageName,
-          startDate: plan.startDate,
-          endDate: plan.endDate,
-          taskCount: body.tasks.length,
-          version: newVersion,
-        } as unknown as Prisma.InputJsonValue,
-      });
+        await writeOperationLog(tx, {
+          studentId,
+          actorId: user.sub,
+          actorName: user.name,
+          actionType: 'plan_create',
+          targetType: 'period_plan',
+          targetId: created.id,
+          detail: {
+            periodCode: created.periodCode,
+            stageName: created.stageName,
+            startDate: created.startDate,
+            endDate: created.endDate,
+            taskCount: body.tasks.length,
+            version: newVersion,
+          } as unknown as Prisma.InputJsonValue,
+        });
+
+        return created;
+      }, { studentId, periodCode: body.periodCode });
 
       return reply.status(201).send({ data: plan });
     },
@@ -706,8 +747,9 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
 
       // 创建变更草稿、通知、操作日志包进同一事务,
       // 并在事务内复查 active + 无 change_pending,防止并发重复变更。
-      const newVersion = plan.version + 1;
-      const newPlan = await fastify.prisma.$transaction(async (tx) => {
+      // 用 withVersionRetry 包装：版本号在 tx 内基于 max(version)+1 重新计算，
+      // 两个并发变更冲突时其中一方拿到 P2002 后会重试取到下一个版本号。
+      const newPlan = await withVersionRetry(fastify, async (tx) => {
         const stillActive = await tx.periodPlan.findFirst({
           where: { id: planId, studentId, status: PlanStatus.active },
           select: { id: true },
@@ -716,6 +758,13 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
           throw createError.planStatus(plan.status, 'active');
         }
         await ensureNoPendingPlanChange(tx, studentId, planId);
+
+        const latest = await tx.periodPlan.findFirst({
+          where: { studentId, periodCode: plan.periodCode },
+          orderBy: { version: 'desc' },
+          select: { version: true },
+        });
+        const newVersion = (latest?.version ?? plan.version) + 1;
 
         const created = await tx.periodPlan.create({
           data: {
@@ -780,7 +829,7 @@ export async function planRoutes(fastify: FastifyInstance): Promise<void> {
         });
 
         return created;
-      });
+      }, { studentId, periodCode: plan.periodCode });
 
       return reply.status(201).send({
         data: newPlan,
