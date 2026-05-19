@@ -110,11 +110,25 @@ async function main(): Promise<void> {
   console.log('风险标签创建完成，共', riskTagData.length, '个标签');
 
   // ═══════════════════════════════════════
-  // 5. 第一个管理员账号（任务要求）
+  // 5. 第一个管理员账号
+  //   - 生产环境必须通过 INITIAL_ADMIN_PASSWORD 环境变量提供，禁止使用默认弱密码。
+  //   - 开发环境若未设置，退回到 dev 默认值，并在控制台显著提示。
   // ═══════════════════════════════════════
-  const adminPassword = 'Admin@123456';
-  const adminPasswordHash = await bcrypt.hash(adminPassword, 10);
-  const demoPasswordHash = await bcrypt.hash('chinichi2026', 10);
+  const isProduction = process.env['NODE_ENV'] === 'production';
+  const envAdminPassword = process.env['INITIAL_ADMIN_PASSWORD'];
+  if (isProduction && (!envAdminPassword || envAdminPassword.length < 12)) {
+    throw new Error(
+      '生产环境 seed 必须设置 INITIAL_ADMIN_PASSWORD（≥12 字符），且禁止使用默认密码。',
+    );
+  }
+  const adminPassword = envAdminPassword ?? 'Admin@123456';
+  if (!envAdminPassword && !isProduction) {
+    console.warn(
+      '\n⚠️  未设置 INITIAL_ADMIN_PASSWORD，将使用 dev 默认密码 Admin@123456。\n   生产部署前务必通过环境变量覆盖。\n',
+    );
+  }
+  const adminPasswordHash = await bcrypt.hash(adminPassword, 12);
+  const demoPasswordHash = await bcrypt.hash('chinichi2026', 12);
 
   const firstAdmin = await prisma.user.upsert({
     where: { phone: '13800138000' },
@@ -422,7 +436,11 @@ async function main(): Promise<void> {
   console.log('\n种子数据插入完成！');
   console.log('\n管理员登录信息：');
   console.log('  手机号: 13800138000');
-  console.log('  密码: Admin@123456');
+  console.log(
+    envAdminPassword
+      ? '  密码: <已通过 INITIAL_ADMIN_PASSWORD 设置，请妥善保管>'
+      : '  密码: Admin@123456 (DEV 默认；生产请改 INITIAL_ADMIN_PASSWORD)',
+  );
   console.log('\n演示账号密码：chinichi2026');
 }
 
