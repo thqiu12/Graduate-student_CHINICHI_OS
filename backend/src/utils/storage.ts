@@ -124,8 +124,11 @@ class OssStorage implements StorageAdapter {
   }
 
   async get(storageKey: string, downloadFilename?: string): Promise<GetResult> {
-    // 直接签发临时 URL,带 Content-Disposition 让浏览器以原始文件名下载
-    const response: Record<string, string> = {};
+    // 直接签发临时 URL。强制 octet-stream 让浏览器始终走"下载"路径，
+    // 即使对象本身的 Content-Type 是 image/html 也不会被内联渲染。
+    const response: Record<string, string> = {
+      'content-type': 'application/octet-stream',
+    };
     if (downloadFilename) {
       response['content-disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(downloadFilename)}`;
     }

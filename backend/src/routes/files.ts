@@ -24,6 +24,20 @@ const FILE_TYPES = [
   'other',
 ];
 const STUDENT_UPLOAD_TYPES = ['research_plan', 'transcript', 'recommendation', 'language_score', 'certificate'];
+
+// 允许上传的扩展名白名单（小写，含点号）。
+// 主动拒绝：.html/.htm/.svg/.js/.jsx/.ts/.tsx/.exe/.bat/.sh/.com 等
+// 可被浏览器内联解析或可执行的类型，避免被当成"用户内容"误执行。
+const ALLOWED_EXTENSIONS = new Set([
+  '.pdf',
+  '.doc', '.docx',
+  '.xls', '.xlsx',
+  '.ppt', '.pptx',
+  '.txt', '.csv',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp',
+  '.zip',
+]);
+
 const FILE_TYPE_NAMES: Record<string, string> = {
   research_plan: '研究计划书',
   transcript: '成绩单',
@@ -135,6 +149,13 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       if (user.roles.includes(Roles.STUDENT) && !STUDENT_UPLOAD_TYPES.includes(fileType)) {
         throw new AppError(ErrorCode.FILE_TYPE_NOT_ALLOWED, '学生不能上传该类型文件');
       }
+      const ext = path.extname(originalName).toLowerCase();
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
+        throw new AppError(
+          ErrorCode.FILE_TYPE_NOT_ALLOWED,
+          `不允许上传 ${ext || '该类型'} 文件`,
+        );
+      }
 
       // 2) 计算版本号(research_plan 累加)
       let versionNo = 1;
@@ -146,7 +167,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // 3) 落存储 → 落 DB。put 失败直接抛出;DB 写失败则同步把刚写入的对象删除以免泄漏。
-      const ext = path.extname(originalName);
+      // ext 已在上方完成白名单校验，这里复用变量。
       const fileId = randomUUID();
       const putResult = await storage.put({
         studentId: id,
@@ -249,9 +270,11 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       if (got.signedUrl) {
         return reply.redirect(302, got.signedUrl);
       }
-      // 本地: 直接流回
+      // 本地: 直接流回。强制 octet-stream + nosniff，避免浏览器对存储里
+      // 任何用户上传的文件做内联渲染/嗅探（即使白名单已限制了上传扩展名）。
       return reply
-        .header('Content-Type', version.mimeType ?? 'application/octet-stream')
+        .header('Content-Type', 'application/octet-stream')
+        .header('X-Content-Type-Options', 'nosniff')
         .header(
           'Content-Length',
           (version.fileSize ?? got.contentLength ?? '')?.toString() ?? undefined,
