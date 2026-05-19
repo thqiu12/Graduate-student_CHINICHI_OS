@@ -179,15 +179,20 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       // 3. 调用阿里云短信 API 发送
       // 4. 记录发送频率（防刷：同一手机号 60s 内不重复发送）
 
-      // 开发环境模拟：固定验证码 123456（验证码本身不写入日志，避免日志泄露）
-      if (process.env['NODE_ENV'] === 'development') {
-        fastify.log.info({ phone }, '[开发模式] 已发放固定验证码（请见接口约定文档）');
+      // 开发环境且显式开启 dev-bypass 时返回固定验证码（仅本地联调使用）。
+      // 仅 NODE_ENV=development 不足以放行 —— 必须再设 ENABLE_DEV_SMS_BYPASS=true，
+      // 避免 staging/未设 NODE_ENV 的环境意外暴露免密登录。
+      if (
+        process.env['NODE_ENV'] === 'development' &&
+        process.env['ENABLE_DEV_SMS_BYPASS'] === 'true'
+      ) {
+        fastify.log.warn({ phone }, '[DEV-ONLY] 跳过真实短信，固定验证码 123456');
         return reply.send({ message: '验证码已发送（开发模式）', expiresIn: 300 });
       }
 
       throw new AppError(
         ErrorCode.NOT_IMPLEMENTED,
-        '生产环境短信服务尚未配置，无法发送验证码',
+        '短信服务尚未配置，无法发送验证码',
       );
     },
   );
@@ -205,16 +210,23 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       }
       const { phone, code } = parsed.data;
 
-      // 开发环境允许固定验证码；生产环境必须接入短信服务后校验 Redis 中的一次性验证码
-      if (process.env['NODE_ENV'] !== 'development') {
+      // dev-bypass：同 send-sms，必须 NODE_ENV=development 且 ENABLE_DEV_SMS_BYPASS=true。
+      // 仅靠 NODE_ENV 不安全（默认即 development，staging 误配会暴露免密登录）。
+      const isDev = process.env['NODE_ENV'] === 'development';
+      const devBypassEnabled = process.env['ENABLE_DEV_SMS_BYPASS'] === 'true';
+      if (!isDev || !devBypassEnabled) {
         throw new AppError(
           ErrorCode.NOT_IMPLEMENTED,
-          '生产环境短信验证码校验尚未配置，请使用账号密码登录',
+          '短信验证码登录尚未接入，请使用账号密码登录',
         );
       }
       if (code !== '123456') {
         throw new AppError(ErrorCode.SMS_CODE_INVALID, '验证码不正确或已过期');
       }
+      fastify.log.warn(
+        { phone },
+        '[DEV-ONLY] 使用固定验证码 123456 完成手机号登录（ENABLE_DEV_SMS_BYPASS=true）',
+      );
 
       // 查找用户
       const user = await fastify.prisma.user.findUnique({
