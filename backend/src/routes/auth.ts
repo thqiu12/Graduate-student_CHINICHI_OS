@@ -8,6 +8,11 @@ import * as bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 import { AppError, ErrorCode } from '../utils/errors';
 import { blacklistJti } from '../utils/redis';
+import {
+  setAuthCookies,
+  clearAuthCookies,
+  REFRESH_COOKIE,
+} from '../utils/auth-cookies';
 
 // ─── 请求体 Schema ───────────────────────────────────────
 const phoneLoginSchema = z.object({
@@ -122,10 +127,15 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         studentId = studentProfile?.id ?? null;
       }
 
+      // 写入 HttpOnly Cookie + CSRF Cookie;
+      // 同时在响应体里也回传 token,旧客户端可继续走 Authorization 头(过渡期)。
+      const csrfToken = setAuthCookies(reply, { accessToken, refreshToken });
+
       return reply.send({
         data: {
           accessToken,
           refreshToken,
+          csrfToken,
           user: {
             id: user.id,
             name: user.name,
@@ -240,10 +250,13 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         studentId = studentProfile?.id ?? null;
       }
 
+      const csrfToken = setAuthCookies(reply, { accessToken, refreshToken });
+
       return reply.send({
         data: {
           accessToken,
           refreshToken,
+          csrfToken,
           user: {
             id: user.id,
             name: user.name,
@@ -290,21 +303,23 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   // POST /api/auth/refresh - 刷新 Token
-  fastify.post<{ Body: { refreshToken: string } }>(
+  fastify.post<{ Body: { refreshToken?: string } }>(
     '/auth/refresh',
     async (
-      request: FastifyRequest<{ Body: { refreshToken: string } }>,
+      request: FastifyRequest<{ Body: { refreshToken?: string } }>,
       reply: FastifyReply,
     ) => {
-      const parsed = refreshTokenSchema.safeParse(request.body);
-      if (!parsed.success) {
-        throw new AppError(ErrorCode.VALIDATION_ERROR, '参数错误');
+      // 优先从 cookie 读 refresh token,降级到请求体(老客户端)
+      const refreshTokenStr =
+        request.cookies?.[REFRESH_COOKIE] ?? request.body?.refreshToken;
+      if (!refreshTokenStr) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, '缺少 Refresh Token');
       }
 
       let payload: { sub: string; type?: string; jti?: string; exp?: number };
       try {
         payload = fastify.jwt.verify<{ sub: string; type?: string; jti?: string; exp?: number }>(
-          parsed.data.refreshToken,
+          refreshTokenStr,
         );
       } catch (_err) {
         throw new AppError(ErrorCode.TOKEN_EXPIRED, 'Refresh Token 已过期，请重新登录');
@@ -342,8 +357,14 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         await blacklistJti(payload.jti, ttlSecondsFromExp(payload.exp));
       }
 
+      // 同步写回新 cookie + CSRF
+      const csrfToken = setAuthCookies(reply, {
+        accessToken,
+        refreshToken: newRefreshToken,
+      });
+
       return reply.send({
-        data: { accessToken, refreshToken: newRefreshToken },
+        data: { accessToken, refreshToken: newRefreshToken, csrfToken },
       });
     },
   );
@@ -365,8 +386,8 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         // access token 已过期或缺失也视为登出成功，无需报错
       }
 
-      // 2) 撤销客户端主动提交的 refresh token
-      const refreshToken = request.body?.refreshToken;
+      // 2) 撤销 refresh token(cookie 优先,降级到请求体)
+      const refreshToken = request.cookies?.[REFRESH_COOKIE] ?? request.body?.refreshToken;
       if (refreshToken) {
         try {
           const decoded = fastify.jwt.verify<{ jti?: string; exp?: number; type?: string }>(
@@ -379,6 +400,9 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           // 已过期/伪造的 refresh token 无需处理
         }
       }
+
+      // 3) 清掉所有认证 cookie
+      clearAuthCookies(reply);
 
       return reply.send({ message: '已登出' });
     },

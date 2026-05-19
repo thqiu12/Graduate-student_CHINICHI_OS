@@ -61,11 +61,15 @@ const authPlugin: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     );
   }
 
-  // 注册 JWT 插件
+  // 注册 JWT 插件,优先从 HttpOnly Cookie 取 token,降级到 Authorization 头
   await fastify.register(fastifyJwt, {
     secret: jwtSecret,
     sign: {
       expiresIn: process.env['JWT_ACCESS_EXPIRES_IN'] ?? '2h',
+    },
+    cookie: {
+      cookieName: 'chinichi_at',
+      signed: false,
     },
   });
 

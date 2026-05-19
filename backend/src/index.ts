@@ -7,6 +7,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import cookie from '@fastify/cookie';
 
 // 插件
 import prismaPlugin from './plugins/prisma';
@@ -27,6 +28,7 @@ import { userRoutes } from './routes/users';
 
 // 工具
 import { AppError } from './utils/errors';
+import { verifyCsrf, CSRF_HEADER } from './utils/auth-cookies';
 
 // BullMQ
 import { scheduleRecurringJobs, closeAllQueues } from './jobs/queue';
@@ -84,6 +86,13 @@ async function buildApp(): Promise<FastifyInstance> {
   await fastify.register(cors, {
     origin: corsAllowList,
     credentials: true,
+    exposedHeaders: [CSRF_HEADER],
+  });
+
+  // ─── Cookie ──────────────────────────────────────────────
+  // 用于把 JWT 放进 HttpOnly Cookie + 实现 double-submit CSRF
+  await fastify.register(cookie, {
+    secret: process.env['COOKIE_SECRET'] ?? process.env['JWT_SECRET'] ?? 'chinichi-cookie-dev',
   });
 
   // ─── 限流（防暴力穷举）──────────────────────────────────
@@ -105,6 +114,18 @@ async function buildApp(): Promise<FastifyInstance> {
   // ─── 自定义插件 ──────────────────────────────────────────
   await fastify.register(prismaPlugin);
   await fastify.register(authPlugin);
+
+  // ─── 全局 CSRF 守卫(double-submit cookie) ─────────────
+  // 仅对"带 access cookie 的非幂等请求"强制要求 X-CSRF-Token 头
+  // 与 cookie 中的 csrf token 一致。Bearer/无会话请求直接放行。
+  fastify.addHook('preHandler', async (request, reply) => {
+    if (!verifyCsrf(request)) {
+      reply.status(403).send({
+        code: 'CSRF_INVALID',
+        message: 'CSRF 校验失败,请刷新页面后重试',
+      });
+    }
+  });
 
   // ─── 全局错误处理 ────────────────────────────────────────
   fastify.setErrorHandler((error, _request, reply) => {

@@ -21,8 +21,10 @@ export default defineConfig({
     proxy: {
       // 开发环境将 /api 请求代理到后端服务
       '/api': {
-        target: 'http://localhost:3001',
+        target: process.env['VITE_API_PROXY_TARGET'] ?? 'http://localhost:3000',
         changeOrigin: true,
+        // 透传 cookie (HttpOnly access cookie 必须能跨 proxy)
+        cookieDomainRewrite: 'localhost',
         rewrite: (path) => path, // 保持 /api 前缀不变
       },
     },

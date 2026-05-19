@@ -4,7 +4,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { tokenStorage } from '../api/client';
+import apiClient, { tokenStorage } from '../api/client';
 
 // ─── 类型定义 ─────────────────────────────────────────────
 
@@ -78,8 +78,13 @@ export const useAuthStore = create<AuthState>()(
         });
       },
 
-      // 登出
+      // 登出: 通知后端撤销 token + 清 cookie,然后本地清状态。
+      // 后端调用失败也不阻塞本地登出(网络中断时仍能退出登录)。
       logout: () => {
+        const refreshToken = tokenStorage.getRefreshToken();
+        apiClient
+          .post('/auth/logout', refreshToken ? { refreshToken } : {})
+          .catch(() => undefined);
         tokenStorage.clearAll();
         set({
           user: null,
