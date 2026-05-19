@@ -118,13 +118,24 @@ function mapImportRows(csvText: string): ImportStudentRow[] {
   }));
 }
 
-async function assertCanUseSubject(
+/**
+ * 校验当前用户是否有权在指定 (subjectId, campusId) 下创建或修改学生。
+ *
+ * - admin_total: 始终允许
+ * - subject_head: 必须有匹配 subjectId 的 UserRole
+ * - teacher: 必须有 UserRole 在 (subjectId, campusId) 上 — 任一字段配置了就必须匹配
+ *   （subjectId/campusId 为 null 的 UserRole 视为"未限定"，不再隐式放行所有学科/校区。
+ *    历史无限定的教师账号需由管理员显式分配学科或校区后才能创建/修改学生。）
+ */
+async function assertCanUseSubjectAndCampus(
   fastify: FastifyInstance,
   user: JwtPayload,
-  subjectId: number,
+  subjectId: number | undefined,
+  campusId: number | undefined,
 ): Promise<void> {
   if (user.roles.includes(Roles.ADMIN_TOTAL)) return;
-  if (user.roles.includes(Roles.SUBJECT_HEAD)) {
+
+  if (user.roles.includes(Roles.SUBJECT_HEAD) && subjectId !== undefined) {
     const role = await fastify.prisma.userRole.findFirst({
       where: {
         userId: user.sub,
@@ -134,7 +145,35 @@ async function assertCanUseSubject(
     });
     if (role) return;
   }
-  if (user.roles.includes(Roles.TEACHER)) return;
+
+  if (user.roles.includes(Roles.TEACHER)) {
+    const teacherRoles = await fastify.prisma.userRole.findMany({
+      where: { userId: user.sub, role: { code: Roles.TEACHER } },
+      select: { subjectId: true, campusId: true },
+    });
+    if (teacherRoles.length === 0) {
+      throw createError.forbidden('教师未分配学科/校区，请联系管理员');
+    }
+    const subjectIds = teacherRoles
+      .map((r) => r.subjectId)
+      .filter((id): id is number => id !== null);
+    const campusIds = teacherRoles
+      .map((r) => r.campusId)
+      .filter((id): id is number => id !== null);
+
+    if (subjectIds.length > 0) {
+      if (subjectId !== undefined && !subjectIds.includes(subjectId)) {
+        throw createError.forbidden('无权操作该学科的学生');
+      }
+    } else if (campusIds.length === 0) {
+      throw createError.forbidden('教师未分配学科或校区，请联系管理员');
+    }
+    if (campusIds.length > 0 && campusId !== undefined && !campusIds.includes(campusId)) {
+      throw createError.forbidden('无权操作该校区的学生');
+    }
+    return;
+  }
+
   throw createError.forbidden('无权创建或修改该学科学生');
 }
 
@@ -426,7 +465,7 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
       }
       const body = parsed.data;
       const user = request.user as JwtPayload;
-      await assertCanUseSubject(fastify, user, body.subjectId);
+      await assertCanUseSubjectAndCampus(fastify, user, body.subjectId, body.campusId);
 
       const isOnlyTeacher = user.roles.includes(Roles.TEACHER) &&
         !user.roles.includes(Roles.SUBJECT_HEAD) &&
@@ -528,8 +567,13 @@ export async function studentRoutes(fastify: FastifyInstance): Promise<void> {
         throw createError.studentNotFound(id);
       }
       await assertStudentAccess(fastify, request.user as JwtPayload, id);
-      if (body.subjectId !== undefined) {
-        await assertCanUseSubject(fastify, request.user as JwtPayload, body.subjectId);
+      if (body.subjectId !== undefined || body.campusId !== undefined) {
+        await assertCanUseSubjectAndCampus(
+          fastify,
+          request.user as JwtPayload,
+          body.subjectId,
+          body.campusId,
+        );
       }
 
       const updated = await fastify.prisma.student.update({
