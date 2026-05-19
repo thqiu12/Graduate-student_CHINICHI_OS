@@ -9,7 +9,7 @@ import {
 } from 'antd';
 import {
   PlusOutlined, UploadOutlined, DeleteOutlined, EyeOutlined,
-  FileTextOutlined, ExperimentOutlined, NotificationOutlined, DownloadOutlined,
+  FileTextOutlined, ExperimentOutlined, NotificationOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -21,6 +21,8 @@ import { usePushNotification } from '../../../api/notifications.api';
 import StagesTab from './StagesTab';
 import TasksTab from './TasksTab';
 import apiClient, { getErrorMessage } from '../../../api/client';
+import { useAuthStore } from '../../../stores/auth.store';
+import FileVersionsWithFeedback, { type FileWithVersions } from '../../../components/FileVersionsWithFeedback';
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
@@ -30,25 +32,8 @@ const RISK_TAG_LABELS: Record<string, string> = {
   inno_gap: '内诺差距', preparation_weak: '备考薄弱', exam_repeat: '重考生',
 };
 
-interface FileVersion {
-  id: string;
-  versionNo: number;
-  size: number;
-  createdAt: string;
-}
-
-interface StudentFile {
-  id: string;
-  fileName: string;
-  fileType: string;
-  description?: string;
-  createdAt: string;
-  uploader?: { name: string };
-  versions: FileVersion[];
-}
-
 interface FilesResponse {
-  data: Record<string, StudentFile[]>;
+  data: Record<string, FileWithVersions[]>;
   typeNames: Record<string, string>;
 }
 
@@ -285,6 +270,8 @@ const FilesTab: React.FC<{ studentId: string }> = ({ studentId }) => {
   const [messageApi, ctxHolder] = message.useMessage();
   const queryClient = useQueryClient();
   const [uploading, setUploading] = useState(false);
+  const { user } = useAuthStore();
+  const currentUserId = user?.id ?? '';
   const { data, isLoading } = useQuery<FilesResponse>({
     queryKey: ['teacher-student-files', studentId],
     queryFn: async () => {
@@ -293,6 +280,7 @@ const FilesTab: React.FC<{ studentId: string }> = ({ studentId }) => {
     },
     enabled: !!studentId,
   });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['teacher-student-files', studentId] });
 
   const handleUpload = async (options: any, fileType: string) => {
     const { file, onSuccess, onError } = options;
@@ -306,7 +294,7 @@ const FilesTab: React.FC<{ studentId: string }> = ({ studentId }) => {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       messageApi.success('文件上传成功');
-      queryClient.invalidateQueries({ queryKey: ['teacher-student-files', studentId] });
+      refresh();
       onSuccess('ok');
     } catch (_e) {
       messageApi.error(getErrorMessage(_e, '上传失败'));
@@ -316,30 +304,11 @@ const FilesTab: React.FC<{ studentId: string }> = ({ studentId }) => {
     }
   };
 
-  const handleDownload = async (file: StudentFile, version: FileVersion) => {
-    try {
-      const res = await apiClient.get(
-        `/students/${studentId}/files/${file.id}/versions/${version.id}/download`,
-        { responseType: 'blob' },
-      );
-      const url = URL.createObjectURL(res.data);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = file.fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      messageApi.error(getErrorMessage(e, '下载失败，请稍后重试'));
-    }
-  };
-
-  const handleDelete = async (file: StudentFile) => {
+  const handleDelete = async (file: FileWithVersions) => {
     try {
       await apiClient.delete(`/students/${studentId}/files/${file.id}`);
       messageApi.success('文件已删除');
-      queryClient.invalidateQueries({ queryKey: ['teacher-student-files', studentId] });
+      refresh();
     } catch (e) {
       messageApi.error(getErrorMessage(e, '删除失败，请稍后重试'));
     }
@@ -394,21 +363,25 @@ const FilesTab: React.FC<{ studentId: string }> = ({ studentId }) => {
                   <List
                     size="small"
                     dataSource={files}
-                    renderItem={(file: StudentFile) => {
+                    renderItem={(file: FileWithVersions) => {
                       const latestVersion = file.versions?.[0];
                       return (
-                        <List.Item
-                          actions={[
-                            latestVersion ? (
-                              <Button
-                                key="download"
-                                size="small"
-                                icon={<DownloadOutlined />}
-                                onClick={() => handleDownload(file, latestVersion)}
-                              >
-                                下载
-                              </Button>
-                            ) : null,
+                        <List.Item style={{ display: 'block' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <div style={{ flex: 1 }}>
+                              <Space size={8} wrap>
+                                <Text strong>{file.fileName}</Text>
+                                <Tag color="blue">v{latestVersion?.versionNo ?? '-'}</Tag>
+                                {(file.pendingFeedbackCount ?? 0) > 0 && (
+                                  <Badge count={file.pendingFeedbackCount} title="待处理批注" />
+                                )}
+                              </Space>
+                              <div>
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                  共 {file.versions.length} 个版本 · {dayjs(file.createdAt).format('YYYY-MM-DD')}
+                                </Text>
+                              </div>
+                            </div>
                             <Popconfirm
                               key="delete"
                               title="确定删除此文件？"
@@ -418,19 +391,14 @@ const FilesTab: React.FC<{ studentId: string }> = ({ studentId }) => {
                               cancelText="取消"
                             >
                               <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
-                            </Popconfirm>,
-                          ].filter(Boolean)}
-                        >
-                          <List.Item.Meta
-                            title={file.fileName}
-                            description={
-                              <Space size={8} wrap>
-                                <Text type="secondary">上传人：{file.uploader?.name ?? '-'}</Text>
-                                <Text type="secondary">版本：v{latestVersion?.versionNo ?? '-'}</Text>
-                                <Text type="secondary">{dayjs(file.createdAt).format('YYYY-MM-DD')}</Text>
-                                {file.description && <Text type="secondary">{file.description}</Text>}
-                              </Space>
-                            }
+                            </Popconfirm>
+                          </div>
+                          <FileVersionsWithFeedback
+                            studentId={studentId}
+                            file={file}
+                            canCreateFeedback={true}
+                            currentUserId={currentUserId}
+                            onChanged={refresh}
                           />
                         </List.Item>
                       );

@@ -3,11 +3,13 @@
 // 存储后端通过 utils/storage 适配:本地盘(dev) 或 阿里云 OSS(生产)
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 import { authenticate } from '../middlewares/authenticate';
 import { authorize, Roles } from '../middlewares/authorize';
-import { AppError, ErrorCode } from '../utils/errors';
+import { AppError, createError, ErrorCode } from '../utils/errors';
 import { JwtPayload } from '../plugins/auth';
 import { assertStudentAccess } from '../utils/access-control';
+import { createInAppNotification } from '../utils/notifications';
 import { Prisma } from '@prisma/client';
 import path from 'path';
 import { randomUUID } from 'node:crypto';
@@ -51,28 +53,77 @@ const FILE_TYPE_NAMES: Record<string, string> = {
 
 type FileWithRelations = Prisma.FileGetPayload<{
   include: {
-    versions: true;
+    versions: {
+      include: {
+        uploader: { select: { id: true; name: true } };
+        feedbacks: {
+          include: {
+            author: { select: { id: true; name: true } };
+            resolvedByUser: { select: { id: true; name: true } };
+          };
+        };
+      };
+    };
     uploader: { select: { name: true } };
   };
 }>;
 
 function serializeFile(file: FileWithRelations) {
-  return {
-    id: file.id,
-    fileName: file.displayName,
-    fileType: file.fileType,
-    description: file.versions[0]?.notes ?? undefined,
-    createdAt: file.createdAt,
-    uploader: file.uploader,
-    versions: file.versions.map((version) => ({
+  // 版本按 versionNo 倒序;每个版本附带"本次修改说明"(notes) 和老师批注
+  const versions = [...file.versions]
+    .sort((a, b) => b.versionNo - a.versionNo)
+    .map((version) => ({
       id: version.id,
       versionNo: version.versionNo,
       size: version.fileSize ? Number(version.fileSize) : 0,
       mimeType: version.mimeType,
       createdAt: version.uploadedAt,
-    })),
+      notes: version.notes ?? null,
+      uploader: version.uploader,
+      feedbacks: [...version.feedbacks]
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .map((f) => ({
+          id: f.id,
+          content: f.content,
+          status: f.status,
+          createdAt: f.createdAt,
+          resolvedAt: f.resolvedAt,
+          author: f.author,
+          resolvedByUser: f.resolvedByUser,
+        })),
+    }));
+  const pendingFeedbackCount = versions.reduce(
+    (sum, v) => sum + v.feedbacks.filter((f) => f.status === 'pending').length,
+    0,
+  );
+  return {
+    id: file.id,
+    fileName: file.displayName,
+    fileType: file.fileType,
+    description: versions[0]?.notes ?? undefined,
+    createdAt: file.createdAt,
+    uploader: file.uploader,
+    versions,
+    pendingFeedbackCount,
   };
 }
+
+const FILE_WITH_RELATIONS_INCLUDE = {
+  versions: {
+    orderBy: { versionNo: 'desc' as const },
+    include: {
+      uploader: { select: { id: true, name: true } },
+      feedbacks: {
+        orderBy: { createdAt: 'asc' as const },
+        include: {
+          author: { select: { id: true, name: true } },
+          resolvedByUser: { select: { id: true, name: true } },
+        },
+      },
+    },
+  },
+  uploader: { select: { name: true } },
+};
 
 export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
   const storage = getStorage();
@@ -89,10 +140,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       const files = await fastify.prisma.file.findMany({
         where: { studentId: id },
         orderBy: { createdAt: 'desc' },
-        include: {
-          versions: { orderBy: { versionNo: 'desc' } },
-          uploader: { select: { name: true } },
-        },
+        include: FILE_WITH_RELATIONS_INCLUDE,
       });
 
       const grouped: Record<string, ReturnType<typeof serializeFile>[]> = {};
@@ -198,7 +246,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
               },
             },
           },
-          include: { versions: true, uploader: { select: { name: true } } },
+          include: FILE_WITH_RELATIONS_INCLUDE,
         });
       } catch (err) {
         // DB 失败 → 回滚刚写入存储的对象,避免成"孤儿文件"
@@ -339,6 +387,207 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       return reply.send({ message: '文件已删除' });
+    },
+  );
+
+  // ─── 批注反馈 ──────────────────────────────────────────────
+  const feedbackBodySchema = z.object({
+    content: z.string().min(1, '反馈内容不能为空').max(2000, '反馈过长'),
+  });
+
+  // POST /api/students/:id/files/:fileId/versions/:versionId/feedback
+  //   老师/学科负责人/教务总负责人对某一版本写批注。
+  fastify.post(
+    '/students/:id/files/:fileId/versions/:versionId/feedback',
+    {
+      preHandler: [
+        authenticate,
+        authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER]),
+      ],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { id, fileId, versionId } = request.params as {
+        id: string;
+        fileId: string;
+        versionId: string;
+      };
+      await assertStudentAccess(fastify, user, id);
+
+      const parsed = feedbackBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, '参数错误', parsed.error.flatten());
+      }
+
+      // 验版本归属
+      const version = await fastify.prisma.fileVersion.findFirst({
+        where: { id: versionId, fileId, file: { studentId: id } },
+        include: { file: { include: { student: { select: { userId: true } } } } },
+      });
+      if (!version) {
+        throw createError.notFound('文件版本', versionId);
+      }
+
+      const feedback = await fastify.prisma.fileFeedback.create({
+        data: {
+          fileId,
+          versionId,
+          authorId: user.sub,
+          content: parsed.data.content,
+          status: 'pending',
+        },
+        include: {
+          author: { select: { id: true, name: true } },
+          resolvedByUser: { select: { id: true, name: true } },
+        },
+      });
+
+      // 通知学生
+      await createInAppNotification(fastify.prisma, {
+        userId: version.file.student.userId,
+        type: 'file_feedback',
+        title: '收到老师对文书的批注',
+        content: `${user.name} 对《${version.file.displayName}》第 ${version.versionNo} 版写了批注，请查看并处理。`,
+        relatedId: fileId,
+      });
+
+      await fastify.prisma.operationLog.create({
+        data: {
+          studentId: id,
+          actorId: user.sub,
+          actorName: user.name,
+          actionType: 'file_feedback_create',
+          targetType: 'file_feedback',
+          targetId: feedback.id,
+          detail: { fileId, versionId, versionNo: version.versionNo } as any,
+        },
+      });
+
+      return reply.status(201).send({ data: feedback, message: '批注已发送' });
+    },
+  );
+
+  // PATCH /api/students/:id/files/:fileId/feedback/:feedbackId/resolve
+  //   学生或老师标记反馈"已处理"（学生处理意味着已采纳；老师可代关闭）
+  fastify.patch(
+    '/students/:id/files/:fileId/feedback/:feedbackId/resolve',
+    {
+      preHandler: [
+        authenticate,
+        authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER, Roles.STUDENT]),
+      ],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { id, fileId, feedbackId } = request.params as {
+        id: string;
+        fileId: string;
+        feedbackId: string;
+      };
+      await assertStudentAccess(fastify, user, id);
+
+      const feedback = await fastify.prisma.fileFeedback.findFirst({
+        where: { id: feedbackId, fileId, version: { file: { studentId: id } } },
+        include: { author: { select: { id: true } } },
+      });
+      if (!feedback) {
+        throw createError.notFound('批注', feedbackId);
+      }
+      if (feedback.status === 'resolved') {
+        return reply.send({ data: feedback, message: '批注已是已处理状态' });
+      }
+
+      const updated = await fastify.prisma.fileFeedback.update({
+        where: { id: feedbackId },
+        data: {
+          status: 'resolved',
+          resolvedAt: new Date(),
+          resolvedBy: user.sub,
+        },
+        include: {
+          author: { select: { id: true, name: true } },
+          resolvedByUser: { select: { id: true, name: true } },
+        },
+      });
+
+      // 通知原作者(老师)
+      if (feedback.author.id !== user.sub) {
+        await createInAppNotification(fastify.prisma, {
+          userId: feedback.author.id,
+          type: 'file_feedback_resolved',
+          title: '文书批注已处理',
+          content: `${user.name} 已处理你的文书批注。`,
+          relatedId: fileId,
+        });
+      }
+
+      await fastify.prisma.operationLog.create({
+        data: {
+          studentId: id,
+          actorId: user.sub,
+          actorName: user.name,
+          actionType: 'file_feedback_resolve',
+          targetType: 'file_feedback',
+          targetId: feedbackId,
+          detail: { fileId, feedbackId } as any,
+        },
+      });
+
+      return reply.send({ data: updated, message: '已标记为已处理' });
+    },
+  );
+
+  // DELETE /api/students/:id/files/:fileId/feedback/:feedbackId
+  //   仅作者可删除自己的 pending 批注;resolved 后保留作为审计
+  fastify.delete(
+    '/students/:id/files/:fileId/feedback/:feedbackId',
+    {
+      preHandler: [
+        authenticate,
+        authorize([Roles.ADMIN_TOTAL, Roles.SUBJECT_HEAD, Roles.TEACHER]),
+      ],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user as JwtPayload;
+      const { id, fileId, feedbackId } = request.params as {
+        id: string;
+        fileId: string;
+        feedbackId: string;
+      };
+      await assertStudentAccess(fastify, user, id);
+
+      const feedback = await fastify.prisma.fileFeedback.findFirst({
+        where: { id: feedbackId, fileId, version: { file: { studentId: id } } },
+      });
+      if (!feedback) {
+        throw createError.notFound('批注', feedbackId);
+      }
+      const isAdmin = user.roles.includes(Roles.ADMIN_TOTAL);
+      if (feedback.authorId !== user.sub && !isAdmin) {
+        throw createError.forbidden('只能删除自己的批注');
+      }
+      if (feedback.status === 'resolved') {
+        throw new AppError(
+          ErrorCode.VALIDATION_ERROR,
+          '已处理的批注不可删除（保留为审计记录）',
+        );
+      }
+
+      await fastify.prisma.fileFeedback.delete({ where: { id: feedbackId } });
+
+      await fastify.prisma.operationLog.create({
+        data: {
+          studentId: id,
+          actorId: user.sub,
+          actorName: user.name,
+          actionType: 'file_feedback_delete',
+          targetType: 'file_feedback',
+          targetId: feedbackId,
+          detail: { fileId, feedbackId } as any,
+        },
+      });
+
+      return reply.send({ message: '批注已删除' });
     },
   );
 }

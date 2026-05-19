@@ -43,6 +43,8 @@ model User {
   coachingRecords     CoachingRecord[]
   uploadedFiles       File[]
   fileVersions        FileVersion[]
+  fileFeedbacks       FileFeedback[]       @relation("FileFeedbackAuthor")
+  resolvedFeedbacks   FileFeedback[]       @relation("FileFeedbackResolver")
   notifications       Notification[]
 
   @@map("users")
@@ -439,10 +441,32 @@ model FileVersion {
   uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
   notes      String?
 
-  file     File @relation(fields: [fileId], references: [id])
-  uploader User @relation(fields: [uploadedBy], references: [id])
+  file      File           @relation(fields: [fileId], references: [id])
+  uploader  User           @relation(fields: [uploadedBy], references: [id])
+  feedbacks FileFeedback[]
 
   @@map("file_versions")
+}
+
+// 文书批注反馈：老师对学生提交的某一版本写反馈，学生可标记已处理
+model FileFeedback {
+  id          String    @id @default(uuid()) @db.Uuid
+  fileId      String    @map("file_id") @db.Uuid
+  versionId   String    @map("version_id") @db.Uuid
+  authorId    String    @map("author_id") @db.Uuid
+  content     String
+  status      String    @default("pending") @db.VarChar(20) // pending / resolved
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  resolvedAt  DateTime? @map("resolved_at") @db.Timestamptz
+  resolvedBy  String?   @map("resolved_by") @db.Uuid
+
+  version        FileVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  author         User        @relation("FileFeedbackAuthor", fields: [authorId], references: [id])
+  resolvedByUser User?       @relation("FileFeedbackResolver", fields: [resolvedBy], references: [id])
+
+  @@index([fileId, status])
+  @@index([versionId])
+  @@map("file_feedbacks")
 }
 
 // ═══════════════════════════════════════

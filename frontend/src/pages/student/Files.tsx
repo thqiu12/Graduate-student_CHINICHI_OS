@@ -5,17 +5,17 @@
 import React, { useState } from 'react';
 import {
   Card, Typography, Empty, Spin, Tag, Space, Button, Upload, message,
-  List, Divider, Popconfirm, Select, Input,
+  List, Divider, Popconfirm, Select, Input, Badge,
 } from 'antd';
 import {
-  DeleteOutlined, DownloadOutlined, UploadOutlined, FileTextOutlined, FilePdfOutlined, FileOutlined,
+  DeleteOutlined, UploadOutlined, FileTextOutlined, FilePdfOutlined, FileOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/auth.store';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient, { getErrorMessage, tokenStorage } from '../../api/client';
 import type { UploadFile } from 'antd';
+import FileVersionsWithFeedback, { type FileWithVersions } from '../../components/FileVersionsWithFeedback';
 
-// UploadChangeInfo 结构
 interface UploadChangeInfo {
   file: UploadFile & { response?: { message?: string } };
   fileList: UploadFile[];
@@ -31,24 +31,8 @@ const FILE_TYPE_OPTIONS = [
   { value: 'certificate', label: '证明文件' },
 ];
 
-// ─── 类型 ─────────────────────────────────────────────────
-interface FileVersion {
-  id: string;
-  versionNo: number;
-  size: number;
-  createdAt: string;
-}
-interface StudentFile {
-  id: string;
-  fileName: string;
-  fileType: string;
-  description?: string;
-  createdAt: string;
-  uploader?: { name: string };
-  versions: FileVersion[];
-}
 interface FilesResponse {
-  data: Record<string, StudentFile[]>;
+  data: Record<string, FileWithVersions[]>;
   typeNames: Record<string, string>;
 }
 
@@ -59,18 +43,11 @@ const FileIcon: React.FC<{ name: string }> = ({ name }) => {
   return <FileOutlined style={{ color: '#8c8c8c', fontSize: 20 }} />;
 };
 
-// ─── 文件大小格式化 ────────────────────────────────────────
-function formatSize(bytes: number): string {
-  if (!bytes) return '—';
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
-}
-
 // ─── 主页面 ───────────────────────────────────────────────
 const FilesPage: React.FC = () => {
   const { user } = useAuthStore();
   const studentId = user?.studentId ?? user?.id ?? '';
+  const userId = user?.id ?? '';
   const queryClient = useQueryClient();
   const [uploading, setUploading] = useState(false);
   const [uploadFileType, setUploadFileType] = useState('research_plan');
@@ -86,6 +63,8 @@ const FilesPage: React.FC = () => {
     enabled: !!studentId,
   });
 
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['student-files', studentId] });
+
   const handleUpload = async (info: UploadChangeInfo) => {
     const { status, response } = info.file;
     if (status === 'uploading') { setUploading(true); return; }
@@ -93,37 +72,18 @@ const FilesPage: React.FC = () => {
     if (status === 'done') {
       messageApi.success(`${info.file.name} 上传成功`);
       setUploadDescription('');
-      queryClient.invalidateQueries({ queryKey: ['student-files', studentId] });
+      refresh();
     } else if (status === 'error') {
       const errMsg = response?.message ?? '上传失败，请重试';
       messageApi.error(errMsg);
     }
   };
 
-  const handleDownload = async (file: StudentFile, version: FileVersion) => {
-    try {
-      const res = await apiClient.get(
-        `/students/${studentId}/files/${file.id}/versions/${version.id}/download`,
-        { responseType: 'blob' },
-      );
-      const url = URL.createObjectURL(res.data);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = file.fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      messageApi.error(getErrorMessage(e, '下载失败，请稍后重试'));
-    }
-  };
-
-  const handleDelete = async (file: StudentFile) => {
+  const handleDelete = async (file: FileWithVersions) => {
     try {
       await apiClient.delete(`/students/${studentId}/files/${file.id}`);
       messageApi.success('文件已删除');
-      queryClient.invalidateQueries({ queryKey: ['student-files', studentId] });
+      refresh();
     } catch (e) {
       messageApi.error(getErrorMessage(e, '删除失败，请稍后重试'));
     }
@@ -214,56 +174,51 @@ const FilesPage: React.FC = () => {
                   <Divider style={{ margin: '0 0 8px' }} />
                   <List
                     dataSource={files}
-                    renderItem={(file: StudentFile) => {
+                    renderItem={(file: FileWithVersions) => {
                       const latestVer = file.versions?.[0];
                       return (
-                        <List.Item style={{ padding: '10px 0' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
+                        <List.Item style={{ padding: '12px 0', display: 'block' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
                             <FileIcon name={file.fileName} />
                             <div style={{ flex: 1 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <Space size={8} wrap>
                                 <Text strong style={{ fontSize: 14 }}>{file.fileName}</Text>
                                 {isResearch && latestVer && (
                                   <Tag color="pink">第{latestVer.versionNo}稿</Tag>
                                 )}
-                              </div>
-                              <Space size={12}>
+                                {(file.pendingFeedbackCount ?? 0) > 0 && (
+                                  <Badge
+                                    count={file.pendingFeedbackCount}
+                                    style={{ backgroundColor: '#fa8c16' }}
+                                    title="待处理批注"
+                                  />
+                                )}
+                              </Space>
+                              <div>
                                 <Text type="secondary" style={{ fontSize: 12 }}>
-                                  {new Date(file.createdAt).toLocaleDateString('zh-CN')}
+                                  共 {file.versions.length} 个版本 · 最近{new Date(file.createdAt).toLocaleDateString('zh-CN')}
                                 </Text>
-                                {latestVer && (
-                                  <Text type="secondary" style={{ fontSize: 12 }}>
-                                    {formatSize(latestVer.size)}
-                                  </Text>
-                                )}
-                                {file.uploader && (
-                                  <Text type="secondary" style={{ fontSize: 12 }}>
-                                    上传者：{file.uploader.name}
-                                  </Text>
-                                )}
-                              </Space>
+                              </div>
                             </div>
-                            {latestVer && (
-                              <Space>
-                                <Button
-                                  icon={<DownloadOutlined />}
-                                  size="small"
-                                  onClick={() => handleDownload(file, latestVer)}
-                                >
-                                  下载
-                                </Button>
-                                <Popconfirm
-                                  title="确定删除此文件？"
-                                  description="删除后文件和版本记录都将移除。"
-                                  onConfirm={() => handleDelete(file)}
-                                  okText="删除"
-                                  cancelText="取消"
-                                >
-                                  <Button danger icon={<DeleteOutlined />} size="small" />
-                                </Popconfirm>
-                              </Space>
-                            )}
+                            <Popconfirm
+                              title="确定删除此文件？"
+                              description="删除后所有版本、批注都会移除。"
+                              onConfirm={() => handleDelete(file)}
+                              okText="删除"
+                              cancelText="取消"
+                            >
+                              <Button danger icon={<DeleteOutlined />} size="small" />
+                            </Popconfirm>
                           </div>
+
+                          {/* 版本+批注展开列表 */}
+                          <FileVersionsWithFeedback
+                            studentId={studentId}
+                            file={file}
+                            canCreateFeedback={false}
+                            currentUserId={userId}
+                            onChanged={refresh}
+                          />
                         </List.Item>
                       );
                     }}
