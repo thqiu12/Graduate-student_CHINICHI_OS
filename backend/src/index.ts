@@ -35,6 +35,7 @@ import { scheduleRecurringJobs, closeAllQueues } from './jobs/queue';
 import { createCheckUnsetPlansWorker } from './jobs/check-unset-plans.job';
 import { createCheckUnconfirmedPlansWorker } from './jobs/check-unconfirmed-plans.job';
 import { createCheckOverdueTasksWorker } from './jobs/check-overdue-tasks.job';
+import { createCheckApplicationDeadlinesWorker } from './jobs/check-application-deadlines.job';
 import { createWeeklySummaryTeacherWorker } from './jobs/weekly-summary-teacher.job';
 import { createWeeklySummaryDeptWorker } from './jobs/weekly-summary-dept.job';
 
@@ -226,9 +227,10 @@ async function start(): Promise<void> {
       createCheckUnsetPlansWorker(fastify.prisma);
       createCheckUnconfirmedPlansWorker(fastify.prisma);
       createCheckOverdueTasksWorker(fastify.prisma);
+      createCheckApplicationDeadlinesWorker(fastify.prisma);
       createWeeklySummaryTeacherWorker(fastify.prisma);
       createWeeklySummaryDeptWorker(fastify.prisma);
-      fastify.log.info('BullMQ 定时任务已启动（5个Worker）');
+      fastify.log.info('BullMQ 定时任务已启动（6个Worker）');
     } catch (err) {
       fastify.log.warn({ err }, 'BullMQ 启动失败（Redis 可能未连接）');
     }
