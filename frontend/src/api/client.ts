@@ -6,7 +6,10 @@
 import axios, { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 
 // ─── 常量 ─────────────────────────────────────────────────
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
+// 生产环境通过 Vercel/部署平台的环境变量配置 VITE_API_BASE_URL。
+// 未配置或为空字符串时使用同源 /api（适用于本地开发或同域反代部署）。
+const ENV_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const BASE_URL = ENV_BASE_URL && ENV_BASE_URL.trim() !== '' ? ENV_BASE_URL : '/api';
 const TOKEN_KEY = 'chinichi_access_token';
 const REFRESH_TOKEN_KEY = 'chinichi_refresh_token';
 const CSRF_COOKIE = 'chinichi_csrf';
