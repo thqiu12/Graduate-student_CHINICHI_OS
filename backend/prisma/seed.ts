@@ -111,24 +111,21 @@ async function main(): Promise<void> {
 
   // ═══════════════════════════════════════
   // 5. 第一个管理员账号
-  //   - 生产环境必须通过 INITIAL_ADMIN_PASSWORD 环境变量提供，禁止使用默认弱密码。
-  //   - 开发环境若未设置，退回到 dev 默认值，并在控制台显著提示。
+  //   - INITIAL_ADMIN_PASSWORD 环境变量必须显式提供（≥12 字符）。
+  //   - 不再有任何 dev fallback：dev 也必须设置，避免误植入弱密码到任何数据库。
   // ═══════════════════════════════════════
   const isProduction = process.env['NODE_ENV'] === 'production';
   const envAdminPassword = process.env['INITIAL_ADMIN_PASSWORD'];
-  if (isProduction && (!envAdminPassword || envAdminPassword.length < 12)) {
+  if (!envAdminPassword) {
     throw new Error(
-      '生产环境 seed 必须设置 INITIAL_ADMIN_PASSWORD（≥12 字符），且禁止使用默认密码。',
+      '必须设置 INITIAL_ADMIN_PASSWORD 环境变量来初始化管理员密码。\n' +
+      '  示例: INITIAL_ADMIN_PASSWORD="<至少12位强密码>" npm run seed',
     );
   }
-  const adminPassword = envAdminPassword ?? 'Admin@123456';
-  if (!envAdminPassword && !isProduction) {
-    console.warn(
-      '\n⚠️  未设置 INITIAL_ADMIN_PASSWORD，将使用 dev 默认密码 Admin@123456。\n   生产部署前务必通过环境变量覆盖。\n',
-    );
+  if (envAdminPassword.length < 12) {
+    throw new Error('INITIAL_ADMIN_PASSWORD 至少需要 12 位字符');
   }
-  const adminPasswordHash = await bcrypt.hash(adminPassword, 12);
-  const demoPasswordHash = await bcrypt.hash('chinichi2026', 12);
+  const adminPasswordHash = await bcrypt.hash(envAdminPassword, 12);
 
   const firstAdmin = await prisma.user.upsert({
     where: { phone: '13800138000' },
@@ -156,11 +153,25 @@ async function main(): Promise<void> {
     },
   });
 
-  console.log('管理员账号创建完成:', firstAdmin.name, '/', firstAdmin.phone);
+  console.log('管理员账号已创建（手机号:', firstAdmin.phone, '）');
 
   // ═══════════════════════════════════════
-  // 6. 测试用户（3个，无密码）
+  // 6. 测试用户（仅非生产环境，需要显式 DEMO_PASSWORD）
   // ═══════════════════════════════════════
+  if (isProduction) {
+    console.log('\n生产环境跳过 demo 用户创建。');
+    console.log('种子数据插入完成。');
+    return;
+  }
+
+  const demoPassword = process.env['DEMO_PASSWORD'];
+  if (!demoPassword) {
+    throw new Error(
+      '非生产环境创建 demo 用户必须设置 DEMO_PASSWORD 环境变量。\n' +
+      '  如果不需要 demo 用户请设置 NODE_ENV=production',
+    );
+  }
+  const demoPasswordHash = await bcrypt.hash(demoPassword, 12);
 
   // 测试管理员
   const adminUser = await prisma.user.upsert({
@@ -426,22 +437,11 @@ async function main(): Promise<void> {
     },
   });
 
-  console.log('测试用户创建完成:');
-  console.log('  - 管理员:', adminUser.name, '/', adminUser.phone);
-  console.log('  - 学科负责人:', subjectHeadUser.name, '/', subjectHeadUser.phone);
-  console.log('  - 班主任:', teacherUser.name, '/', teacherUser.phone);
-  console.log('  - 学生:', studentUser.name, '/', studentUser.phone);
-  console.log('  - 执行中规划学生:', activeStudentUser.name, '/', activeStudentUser.phone);
-
-  console.log('\n种子数据插入完成！');
-  console.log('\n管理员登录信息：');
-  console.log('  手机号: 13800138000');
-  console.log(
-    envAdminPassword
-      ? '  密码: <已通过 INITIAL_ADMIN_PASSWORD 设置，请妥善保管>'
-      : '  密码: Admin@123456 (DEV 默认；生产请改 INITIAL_ADMIN_PASSWORD)',
-  );
-  console.log('\n演示账号密码：chinichi2026');
+  console.log('Demo 用户创建完成（5 个账号）。');
+  console.log('\n种子数据插入完成。');
+  console.log('管理员/Demo 密码请查阅 INITIAL_ADMIN_PASSWORD / DEMO_PASSWORD 环境变量。');
+  // 不在日志里回显任何凭据值，避免 stdout 或日志文件中暴露
+  void adminUser; void subjectHeadUser; void teacherUser; void studentUser; void activeStudentUser;
 }
 
 main()
