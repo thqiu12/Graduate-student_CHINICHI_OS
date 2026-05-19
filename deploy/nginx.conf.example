@@ -1,0 +1,98 @@
+# Nginx 反向代理 + HTTPS 模板
+# 用法: cp nginx.conf.example /etc/nginx/sites-available/chinichi
+#       ln -s /etc/nginx/sites-available/chinichi /etc/nginx/sites-enabled/
+#       certbot --nginx -d chinichi.jp -d api.chinichi.jp
+#       nginx -t && systemctl reload nginx
+#
+# 替换 chinichi.jp / api.chinichi.jp 为真实域名。
+
+# ─── 全局优化 ─────────────────────────────────────────────
+# 客户端请求体大小(配合后端 multipart 50MB 上限留余量)
+client_max_body_size 60m;
+client_body_timeout 30s;
+client_header_timeout 10s;
+
+# ─── 前端 SPA ────────────────────────────────────────────
+server {
+    listen 80;
+    listen [::]:80;
+    server_name chinichi.jp;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name chinichi.jp;
+
+    # certbot 自动写入
+    ssl_certificate /etc/letsencrypt/live/chinichi.jp/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/chinichi.jp/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    root /var/www/chinichi-frontend;
+    index index.html;
+
+    # SPA 回退
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 静态资源加长缓存(Vite 文件名带 hash,改了就换名)
+    location ~* \.(?:js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+}
+
+# ─── 后端 API ────────────────────────────────────────────
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.chinichi.jp;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name api.chinichi.jp;
+
+    ssl_certificate /etc/letsencrypt/live/api.chinichi.jp/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.chinichi.jp/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Cookie 透传不需要额外配置;HttpOnly 由后端 setCookie 决定。
+        # SSE/长轮询时关掉缓冲,普通 JSON 接口不需要。
+        proxy_buffering on;
+
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+    }
+
+    # 健康检查直通,不计入访问日志
+    location = /health {
+        access_log off;
+        proxy_pass http://127.0.0.1:3000/health;
+    }
+}

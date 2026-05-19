@@ -1,0 +1,58 @@
+# Caddy 反向代理 + 自动 HTTPS(Let's Encrypt)
+# 用法: cp Caddyfile.example /etc/caddy/Caddyfile && systemctl reload caddy
+# 替换 chinichi.jp 与 api.chinichi.jp 为真实域名。
+#
+# 前提:
+#   - 域名 A 记录指向本机公网 IP
+#   - 80/443 端口在防火墙放行
+#   - 后端 Fastify 监听 127.0.0.1:3000 (PM2 配置)
+#   - 前端 dist 部署到 /var/www/chinichi-frontend
+
+# ─── 前端 SPA (chinichi.jp) ────────────────────────────────
+chinichi.jp {
+    encode gzip zstd
+    root * /var/www/chinichi-frontend
+    file_server
+
+    # SPA 路由:不存在的资源都回退到 index.html
+    try_files {path} /index.html
+
+    # 安全头(helmet 已经在后端加过,这里再为前端静态资源加一层)
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # 由 Caddy 设置,移除 Caddy 默认 Server 头
+        -Server
+    }
+}
+
+# ─── 后端 API (api.chinichi.jp) ────────────────────────────
+api.chinichi.jp {
+    encode gzip zstd
+
+    # 限制单请求 body 大小(配合后端 multipart 50MB 上限留一点余量)
+    request_body {
+        max_size 60MB
+    }
+
+    # 反代到本机 Fastify
+    reverse_proxy 127.0.0.1:3000 {
+        # 透传真实客户端 IP,让 fastify rate-limit 与日志能拿到
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+
+        # 健康检查(可选):每 10s 探一次 /health,失败摘除
+        health_uri /health
+        health_interval 10s
+        health_timeout 3s
+    }
+
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        -Server
+    }
+}
