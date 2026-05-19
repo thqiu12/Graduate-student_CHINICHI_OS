@@ -39,6 +39,9 @@ export interface FileWithVersions {
   id: string;
   fileName: string;
   fileType: string;
+  createdAt: string;
+  description?: string;
+  uploader?: { name: string };
   versions: FileVersionItem[];
   pendingFeedbackCount?: number;
 }
